@@ -68,11 +68,52 @@ UNITREE_ORCA_CONTROL_DT = 0.02
 UNITREE_ORCA_GROUND_FRICTION = (1.0, 0.005, 0.0001)
 UNITREE_ORCA_GROUND_SOLREF = (0.02, 1.0)
 UNITREE_ORCA_GROUND_SOLIMP = (0.9, 0.95, 0.001, 0.5, 2.0)
+MIN_GROUND_SLAB_HALF_EXTENT = 2.0
+MAX_GROUND_SLAB_HALF_THICKNESS = 0.25
+MIN_GROUND_UP_ALIGNMENT = 0.9961946980917455  # cos(5 degrees)
 
 SCENE_OPTION_PROFILES = {
     "orca-runtime": UNITREE_ORCA_SCENE_OPTIONS,
     "orca-train": ORCA_TRAIN_SCENE_OPTIONS,
 }
+
+
+def _parse_float_vector(value: str | None) -> tuple[float, ...] | None:
+    if not value:
+        return None
+    try:
+        return tuple(float(component) for component in value.split())
+    except ValueError:
+        return None
+
+
+def _xml_geom_is_ground_candidate(geom: ET.Element) -> bool:
+    """Recognize a plane or a broad, shallow, locally level floor slab."""
+
+    geom_type = geom.get("type", "").lower()
+    if geom_type == "plane":
+        return True
+    if geom_type != "box":
+        return False
+    size = _parse_float_vector(geom.get("size"))
+    if size is None or len(size) != 3:
+        return False
+    if (
+        size[0] < MIN_GROUND_SLAB_HALF_EXTENT
+        or size[1] < MIN_GROUND_SLAB_HALF_EXTENT
+        or size[2] > MAX_GROUND_SLAB_HALF_THICKNESS
+    ):
+        return False
+    quat = _parse_float_vector(geom.get("quat")) or (1.0, 0.0, 0.0, 0.0)
+    if len(quat) != 4:
+        return False
+    norm_squared = sum(component * component for component in quat)
+    if norm_squared <= 0.0:
+        return False
+    # A yaw-only quaternion has no x/y component. The compiled-model validator
+    # below performs the authoritative world-frame orientation check.
+    horizontal_rotation = (quat[1] * quat[1] + quat[2] * quat[2]) / norm_squared
+    return horizontal_rotation <= (1.0 - MIN_GROUND_UP_ALIGNMENT) / 2.0
 
 
 def scene_xml_contract(path: str | Path) -> dict[str, Any]:
@@ -84,11 +125,13 @@ def scene_xml_contract(path: str | Path) -> dict[str, Any]:
     option = root.find("option")
     ground_geoms = []
     for geom in root.iter("geom"):
-        if geom.get("type", "").lower() != "plane":
+        if not _xml_geom_is_ground_candidate(geom):
             continue
         ground_geoms.append(
             {
                 "name": geom.get("name", ""),
+                "type": geom.get("type", ""),
+                "size": geom.get("size"),
                 "friction": geom.get("friction"),
                 "solref": geom.get("solref"),
                 "solimp": geom.get("solimp"),
@@ -215,17 +258,39 @@ def assert_flat_ground_options(
     *,
     atol: float = 1.0e-9,
 ) -> list[dict[str, Any]]:
-    """Verify every plane geom against the flat locomotion contact contract."""
+    """Verify planes or fixed, level floor slabs against the contact contract."""
 
-    planes: list[dict[str, Any]] = []
+    ground_geoms: list[dict[str, Any]] = []
     mismatches: list[str] = []
+    plane_type = int(mujoco.mjtGeom.mjGEOM_PLANE)
+    box_type = int(mujoco.mjtGeom.mjGEOM_BOX)
+    data = mujoco.MjData(model)
+    mujoco.mj_forward(model, data)
+    has_plane = any(int(model.geom_type[index]) == plane_type for index in range(model.ngeom))
     for geom_id in range(model.ngeom):
-        if int(model.geom_type[geom_id]) != int(mujoco.mjtGeom.mjGEOM_PLANE):
+        geom_type = int(model.geom_type[geom_id])
+        is_plane = geom_type == plane_type
+        is_slab = False
+        if not has_plane and geom_type == box_type:
+            size = model.geom_size[geom_id]
+            body_id = int(model.geom_bodyid[geom_id])
+            rotation = data.geom_xmat[geom_id]
+            world_up_alignment = abs(float(rotation[8]))
+            is_slab = (
+                float(size[0]) >= MIN_GROUND_SLAB_HALF_EXTENT
+                and float(size[1]) >= MIN_GROUND_SLAB_HALF_EXTENT
+                and float(size[2]) <= MAX_GROUND_SLAB_HALF_THICKNESS
+                and int(model.body_weldid[body_id]) == 0
+                and world_up_alignment >= MIN_GROUND_UP_ALIGNMENT
+            )
+        if not is_plane and not is_slab:
             continue
         name = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, geom_id) or ""
         snapshot = {
             "id": geom_id,
             "name": name,
+            "type": "plane" if is_plane else "box_slab",
+            "size": model.geom_size[geom_id].tolist(),
             "friction": model.geom_friction[geom_id].tolist(),
             "solref": model.geom_solref[geom_id].tolist(),
             "solimp": model.geom_solimp[geom_id].tolist(),
@@ -233,7 +298,7 @@ def assert_flat_ground_options(
             "conaffinity": int(model.geom_conaffinity[geom_id]),
             "condim": int(model.geom_condim[geom_id]),
         }
-        planes.append(snapshot)
+        ground_geoms.append(snapshot)
         vector_expected = {
             "friction": UNITREE_ORCA_GROUND_FRICTION,
             "solref": UNITREE_ORCA_GROUND_SOLREF,
@@ -249,13 +314,16 @@ def assert_flat_ground_options(
                 mismatches.append(
                     f"{name or geom_id}.{key}={snapshot[key]!r} expected {wanted!r}"
                 )
-    if not planes:
-        raise RuntimeError("aligned OrcaLab XML has no flat ground plane geom")
+    if not ground_geoms:
+        raise RuntimeError(
+            "aligned OrcaLab XML has no compatible flat ground geom "
+            "(expected a plane or a fixed, level floor slab)"
+        )
     if mismatches:
         raise RuntimeError(
             "flat ground contact profile is not aligned: " + "; ".join(mismatches)
         )
-    return planes
+    return ground_geoms
 
 
 def np_allclose(
@@ -344,7 +412,7 @@ def patch_scene_xml_options(
         "condim": "3",
     }
     for geom in root.iter("geom"):
-        if geom.get("type", "").lower() != "plane":
+        if not _xml_geom_is_ground_candidate(geom):
             continue
         for name, value in ground_values.items():
             geom.set(name, value)

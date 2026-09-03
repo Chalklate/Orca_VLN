@@ -13,6 +13,10 @@ PLAN_OUTPUT="${PROJECT_ROOT}/outputs/memory_guide/latest_plan.json"
 WAYPOINT_OUTPUT="${PROJECT_ROOT}/outputs/memory_guide/latest_waypoints.txt"
 PLAN_ONLY=false
 RUN_ARGS=()
+CAMERA_ARGS=(
+  --camera-mount-position 0.1 0 0.9
+  --stabilize-camera-horizon
+)
 
 usage() {
   cat <<EOF
@@ -25,7 +29,9 @@ Memory options:
   --waypoint-output PATH    Generated NaVILA waypoint file
   --plan-only               Generate the plan without starting locomotion
 
-All other arguments are forwarded to run_orcalab_scene_locomotion.sh.
+The Memory Guide camera defaults to a stabilized 0.9 m vertical mount offset.
+All other arguments are forwarded to run_orcalab_scene_locomotion.sh, and
+later camera arguments override these defaults.
 EOF
 }
 
@@ -90,4 +96,5 @@ fi
 
 exec "${SCRIPT_DIR}/run_orcalab_scene_locomotion.sh" \
   --waypoint-instruction-file "${WAYPOINT_OUTPUT}" \
+  "${CAMERA_ARGS[@]}" \
   "${RUN_ARGS[@]}"

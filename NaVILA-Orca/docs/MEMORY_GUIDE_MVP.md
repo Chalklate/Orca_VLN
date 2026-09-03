@@ -66,6 +66,11 @@ If the glasses observation is recent and confident, the dog receives one
 direct waypoint. If memory is absent or unreliable, it receives the catalog's
 staged search locations. Existing runner options may be appended normally.
 
+The Memory Guide launcher uses a stabilized camera mount at `(0.1, 0, 0.9)` by
+default so the dog can inspect tables and kitchen counters. A different mount
+can be supplied with `--camera-mount-position X Y Z`; arguments supplied to the
+launcher take precedence over this default.
+
 ## MVP boundary
 
 This first version provides query routing, persistent memory, freshness logic,

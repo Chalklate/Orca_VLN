@@ -31,6 +31,7 @@ test = ["pytest==9.1.1"]
 [project.scripts]
 navvlm-orcalab = "navila_orca.cli:main"
 navvlm-orcalab-render-server = "navila_orca.render.grpc_bridge:server_main"
+navila-memory-guide = "navila_orca.memory_guide:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

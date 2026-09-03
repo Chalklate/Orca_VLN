@@ -1,0 +1,241 @@
+{
+    "version": "3.0",
+    "viewport_camera_transform": {
+        "position": [
+            0.8328340649604797,
+            -0.012830784544348717,
+            2.2798330783843994
+        ],
+        "rotation": [
+            0.6378156561949453,
+            -0.30222103090528674,
+            -0.30334359498603825,
+            0.6401845832040189
+        ]
+    },
+    "actors": [
+        {
+            "name": "Group",
+            "path": "/Group",
+            "type": "GroupActor",
+            "transform": {
+                "position": [
+                    0.0,
+                    0.0,
+                    0.0
+                ],
+                "rotation": [
+                    1.0,
+                    0.0,
+                    0.0,
+                    0.0
+                ],
+                "scale": 1.0
+            },
+            "children": [
+                {
+                    "name": "StaticObjects",
+                    "path": "/Group/StaticObjects",
+                    "type": "GroupActor",
+                    "transform": {
+                        "position": [
+                            0.0,
+                            0.0,
+                            0.0
+                        ],
+                        "rotation": [
+                            1.0,
+                            0.0,
+                            0.0,
+                            0.0
+                        ],
+                        "scale": 1.0
+                    },
+                    "children": [
+                        {
+                            "name": "Trolley_02",
+                            "path": "/Group/StaticObjects/Trolley_02",
+                            "type": "AssetActor",
+                            "transform": {
+                                "position": [
+                                    -1.0250757932662964,
+                                    -1.9859589338302612,
+                                    -7.748603820800781e-07
+                                ],
+                                "rotation": [
+                                    0.0,
+                                    0.0,
+                                    0.0,
+                                    1.0
+                                ],
+                                "scale": 1.0
+                            },
+                            "asset_path": "assets/e071469a36d3c8aa/autoproductionline_warehouse/autoproductionline_warehouse/prop/trolley_02/trolley_02"
+                        },
+                        {
+                            "name": "Box_Blue",
+                            "path": "/Group/StaticObjects/Box_Blue",
+                            "type": "AssetActor",
+                            "transform": {
+                                "position": [
+                                    -1.322290301322937,
+                                    -1.9711016416549685,
+                                    1.0793242454528809
+                                ],
+                                "rotation": [
+                                    0.0011379414048337747,
+                                    0.004738204907448752,
+                                    0.23352001891630148,
+                                    0.972339783855903
+                                ],
+                                "scale": 1.0
+                            },
+                            "asset_path": "assets/e071469a36d3c8aa/autoproductionline_warehouse/autoproductionline_warehouse/prop/box_01/box_blue"
+                        },
+                        {
+                            "name": "Box_Purple",
+                            "path": "/Group/StaticObjects/Box_Purple",
+                            "type": "AssetActor",
+                            "transform": {
+                                "position": [
+                                    -0.7274863123893738,
+                                    -1.983866572380066,
+                                    1.0793242454528809
+                                ],
+                                "rotation": [
+                                    0.0011379076375294217,
+                                    0.004738064305827731,
+                                    0.23352001908084685,
+                                    0.9723397845410436
+                                ],
+                                "scale": 1.0
+                            },
+                            "asset_path": "assets/e071469a36d3c8aa/autoproductionline_warehouse/autoproductionline_warehouse/prop/box_01/box_purple"
+                        },
+                        {
+                            "name": "table_01",
+                            "path": "/Group/StaticObjects/table_01",
+                            "type": "AssetActor",
+                            "transform": {
+                                "position": [
+                                    0.0,
+                                    0.0,
+                                    0.0
+                                ],
+                                "rotation": [
+                                    1.0,
+                                    0.0,
+                                    0.0,
+                                    0.0
+                                ],
+                                "scale": 1.0
+                            },
+                            "asset_path": "assets/e071469a36d3c8aa/autoproductionline_warehouse/autoproductionline_warehouse/prop/table_01/table_01"
+                        },
+                        {
+                            "name": "table_01_1",
+                            "path": "/Group/StaticObjects/table_01_1",
+                            "type": "AssetActor",
+                            "transform": {
+                                "position": [
+                                    0.0,
+                                    1.6025325059890747,
+                                    0.0
+                                ],
+                                "rotation": [
+                                    1.0,
+                                    0.0,
+                                    0.0,
+                                    0.0
+                                ],
+                                "scale": 1.0
+                            },
+                            "asset_path": "assets/e071469a36d3c8aa/autoproductionline_warehouse/autoproductionline_warehouse/prop/table_01/table_01"
+                        },
+                        {
+                            "name": "table_01_2",
+                            "path": "/Group/StaticObjects/table_01_2",
+                            "type": "AssetActor",
+                            "transform": {
+                                "position": [
+                                    0.0,
+                                    -1.6017955541610718,
+                                    0.0
+                                ],
+                                "rotation": [
+                                    1.0,
+                                    0.0,
+                                    0.0,
+                                    0.0
+                                ],
+                                "scale": 1.0
+                            },
+                            "asset_path": "assets/e071469a36d3c8aa/autoproductionline_warehouse/autoproductionline_warehouse/prop/table_01/table_01"
+                        },
+                        {
+                            "name": "table_01_3",
+                            "path": "/Group/StaticObjects/table_01_3",
+                            "type": "AssetActor",
+                            "transform": {
+                                "position": [
+                                    -1.2064043283462524,
+                                    1.4254006147384644,
+                                    0.0
+                                ],
+                                "rotation": [
+                                    0.7071071107358423,
+                                    0.0,
+                                    0.0,
+                                    0.7071064516370992
+                                ],
+                                "scale": 1.0
+                            },
+                            "asset_path": "assets/e071469a36d3c8aa/autoproductionline_warehouse/autoproductionline_warehouse/prop/table_01/table_01"
+                        }
+                    ]
+                },
+                {
+                    "name": "InteractiveObjects",
+                    "path": "/Group/InteractiveObjects",
+                    "type": "GroupActor",
+                    "transform": {
+                        "position": [
+                            0.0,
+                            0.0,
+                            0.0
+                        ],
+                        "rotation": [
+                            1.0,
+                            0.0,
+                            0.0,
+                            0.0
+                        ],
+                        "scale": 1.0
+                    },
+                    "children": [
+                        {
+                            "name": "Battery",
+                            "path": "/Group/InteractiveObjects/Battery",
+                            "type": "AssetActor",
+                            "transform": {
+                                "position": [
+                                    -0.055838197469711304,
+                                    4.9923237099847035e-08,
+                                    0.991710901260376
+                                ],
+                                "rotation": [
+                                    0.7071071107358423,
+                                    0.0,
+                                    0.0,
+                                    0.7071064516370992
+                                ],
+                                "scale": 1.0
+                            },
+                            "asset_path": "assets/e071469a36d3c8aa/autoproductionline_warehouse/autoproductionline_warehouse/prop/battery/battery"
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
+}

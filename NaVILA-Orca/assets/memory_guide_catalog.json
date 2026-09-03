@@ -1,0 +1,112 @@
+{
+  "version": 1,
+  "items": {
+    "medication": {
+      "display_name": "medication organizer",
+      "aliases": ["medication", "medicine", "meds", "pill box", "medication organizer"],
+      "search_locations": [
+        "the kitchen drawer beside the counter",
+        "the top of the dining table",
+        "the living-room side table"
+      ]
+    },
+    "phone": {
+      "display_name": "phone",
+      "aliases": ["phone", "mobile phone", "cell phone", "smartphone"],
+      "search_locations": [
+        "the top of the dining table",
+        "the living-room side table",
+        "the entryway belongings tray"
+      ]
+    },
+    "glasses": {
+      "display_name": "glasses case",
+      "aliases": ["glasses", "spectacles", "eyeglasses", "glasses case"],
+      "search_locations": [
+        "the kitchen-facing side of the dining table",
+        "the living-room side table",
+        "the entryway belongings tray"
+      ]
+    },
+    "keys": {
+      "display_name": "keys",
+      "aliases": ["keys", "house keys", "key ring", "keyring"],
+      "search_locations": [
+        "the entryway belongings tray",
+        "the top of the dining table",
+        "the living-room side table"
+      ]
+    },
+    "wallet": {
+      "display_name": "wallet",
+      "aliases": ["wallet", "purse", "card holder"],
+      "search_locations": [
+        "the entryway belongings tray",
+        "the top of the dining table",
+        "the living-room side table"
+      ]
+    },
+    "hearing_aid": {
+      "display_name": "hearing-aid charging case",
+      "aliases": ["hearing aid", "hearing aids", "hearing-aid case"],
+      "search_locations": [
+        "the living-room side table",
+        "the top of the dining table",
+        "the entryway belongings tray"
+      ]
+    },
+    "dentures": {
+      "display_name": "denture container",
+      "aliases": ["dentures", "denture case", "denture container"],
+      "search_locations": [
+        "the bathroom sink area",
+        "the living-room side table",
+        "the dining table"
+      ]
+    },
+    "tv_remote": {
+      "display_name": "TV remote",
+      "aliases": ["remote", "tv remote", "television remote"],
+      "search_locations": [
+        "the living-room sofa area",
+        "the living-room side table",
+        "the dining table"
+      ]
+    },
+    "shoes": {
+      "display_name": "shoes",
+      "aliases": ["shoes", "slippers", "footwear"],
+      "search_locations": [
+        "the entryway floor beside the belongings tray",
+        "the living-room perimeter"
+      ]
+    }
+  },
+  "places": {
+    "bathroom": {
+      "aliases": ["bathroom", "toilet", "washroom"],
+      "navigation_instruction": "Find the bathroom doorway landmark, approach through clear floor space, and stop outside the doorway."
+    },
+    "kitchen": {
+      "aliases": ["kitchen", "cooking area"],
+      "navigation_instruction": "Walk toward the kitchen counter area and stop in the nearest clear floor space."
+    },
+    "dining_area": {
+      "aliases": ["dining area", "dining table", "table"],
+      "navigation_instruction": "Find the dining table surrounded by four chairs, approach its kitchen-facing side, and stop one meter away."
+    }
+  },
+  "leaving_checklist": ["phone", "keys", "wallet", "glasses", "hearing_aid"],
+  "default_search_locations": [
+    "the kitchen-facing side of the dining table",
+    "the kitchen counter and nearby accessible surfaces",
+    "the living-room side table",
+    "the entryway belongings tray"
+  ],
+  "patrol_waypoints": [
+    "Enter the dining area, inspect the dining table and nearby floor, then stop in clear floor space.",
+    "Continue to the kitchen, inspect the counter and accessible storage area, then stop in clear floor space.",
+    "Continue to the living-room area, inspect the side table and sofa perimeter, then stop in clear floor space.",
+    "Continue to the entryway, inspect the belongings tray and nearby floor, then stop in clear floor space."
+  ]
+}

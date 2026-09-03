@@ -1,0 +1,403 @@
+{
+    "version": "3.0",
+    "viewport_camera_transform": {
+        "position": [
+            0.44393348693847656,
+            -2.724890947341919,
+            5.127940654754639
+        ],
+        "rotation": [
+            0.9999699906542715,
+            -1.402421509283512e-05,
+            1.0843879443791553e-07,
+            -0.007747102310262785
+        ]
+    },
+    "actors": [
+        {
+            "name": "Group",
+            "path": "/Group",
+            "type": "GroupActor",
+            "transform": {
+                "position": [
+                    0.0,
+                    0.0,
+                    0.0
+                ],
+                "rotation": [
+                    1.0,
+                    0.0,
+                    0.0,
+                    0.0
+                ],
+                "scale": 1.0
+            },
+            "children": [
+                {
+                    "name": "StaticObjects",
+                    "path": "/Group/StaticObjects",
+                    "type": "GroupActor",
+                    "transform": {
+                        "position": [
+                            0.0,
+                            0.0,
+                            0.0
+                        ],
+                        "rotation": [
+                            1.0,
+                            0.0,
+                            0.0,
+                            0.0
+                        ],
+                        "scale": 1.0
+                    },
+                    "children": [
+                        {
+                            "name": "Props",
+                            "path": "/Group/StaticObjects/Props",
+                            "type": "GroupActor",
+                            "transform": {
+                                "position": [
+                                    0.0,
+                                    0.0,
+                                    4.0
+                                ],
+                                "rotation": [
+                                    1.0,
+                                    0.0,
+                                    0.0,
+                                    0.0
+                                ],
+                                "scale": 1.0
+                            },
+                            "children": [
+                                {
+                                    "name": "ABSNightstand",
+                                    "path": "/Group/StaticObjects/Props/ABSNightstand",
+                                    "type": "AssetActor",
+                                    "transform": {
+                                        "position": [
+                                            1.7236779928207395,
+                                            1.679091215133667,
+                                            0.0
+                                        ],
+                                        "rotation": [
+                                            1.0,
+                                            0.0,
+                                            0.0,
+                                            0.0
+                                        ],
+                                        "scale": 1.0
+                                    },
+                                    "asset_path": "assets/e071469a36d3c8aa/nursinghome/yly/props/me_nightstand/absnightstand"
+                                },
+                                {
+                                    "name": "Monitor",
+                                    "path": "/Group/StaticObjects/Props/Monitor",
+                                    "type": "AssetActor",
+                                    "transform": {
+                                        "position": [
+                                            -0.2851717174053192,
+                                            1.9514909982681272,
+                                            1.5880961418151855
+                                        ],
+                                        "rotation": [
+                                            1.0,
+                                            0.0,
+                                            0.0,
+                                            0.0
+                                        ],
+                                        "scale": 1.0
+                                    },
+                                    "asset_path": "assets/e071469a36d3c8aa/nursinghome/yly/props/me_nightstand/monitor"
+                                },
+                                {
+                                    "name": "Nightstand",
+                                    "path": "/Group/StaticObjects/Props/Nightstand",
+                                    "type": "AssetActor",
+                                    "transform": {
+                                        "position": [
+                                            -0.7990065813064575,
+                                            1.717158317565918,
+                                            -0.00340127944946289
+                                        ],
+                                        "rotation": [
+                                            1.0,
+                                            0.0,
+                                            0.0,
+                                            0.0
+                                        ],
+                                        "scale": 1.0
+                                    },
+                                    "asset_path": "assets/e071469a36d3c8aa/nursinghome/yly/props/me_nightstand/nightstand"
+                                },
+                                {
+                                    "name": "table_01",
+                                    "path": "/Group/StaticObjects/Props/table_01",
+                                    "type": "AssetActor",
+                                    "transform": {
+                                        "position": [
+                                            -0.512662410736084,
+                                            0.8708502650260925,
+                                            0.0
+                                        ],
+                                        "rotation": [
+                                            0.0,
+                                            0.0,
+                                            0.0,
+                                            1.0
+                                        ],
+                                        "scale": 1.0
+                                    },
+                                    "asset_path": "assets/e071469a36d3c8aa/nursinghome/yly/props/els/table_01"
+                                },
+                                {
+                                    "name": "Bed",
+                                    "path": "/Group/StaticObjects/Props/Bed",
+                                    "type": "AssetActor",
+                                    "transform": {
+                                        "position": [
+                                            0.2112494856119156,
+                                            0.9364639520645142,
+                                            -0.0007910728454589844
+                                        ],
+                                        "rotation": [
+                                            1.0,
+                                            0.0,
+                                            0.0,
+                                            0.0
+                                        ],
+                                        "scale": 1.0
+                                    },
+                                    "asset_path": "assets/e071469a36d3c8aa/nursinghome/yly/props/bed/bed"
+                                }
+                            ]
+                        },
+                        {
+                            "name": "Furniture",
+                            "path": "/Group/StaticObjects/Furniture",
+                            "type": "GroupActor",
+                            "transform": {
+                                "position": [
+                                    0.0,
+                                    0.0,
+                                    0.0
+                                ],
+                                "rotation": [
+                                    1.0,
+                                    0.0,
+                                    0.0,
+                                    0.0
+                                ],
+                                "scale": 1.0
+                            },
+                            "children": [
+                                {
+                                    "name": "Sofa02",
+                                    "path": "/Group/StaticObjects/Furniture/Sofa02",
+                                    "type": "AssetActor",
+                                    "transform": {
+                                        "position": [
+                                            -2.1181864738464355,
+                                            -0.3935720324516296,
+                                            4.038890838623047
+                                        ],
+                                        "rotation": [
+                                            0.7071071107358423,
+                                            0.0,
+                                            0.0,
+                                            0.7071064516370992
+                                        ],
+                                        "scale": 1.0
+                                    },
+                                    "asset_path": "assets/e071469a36d3c8aa/nursinghome/yly/props/sofa02/sofa02"
+                                },
+                                {
+                                    "name": "U_Curtain_merged",
+                                    "path": "/Group/StaticObjects/Furniture/U_Curtain_merged",
+                                    "type": "AssetActor",
+                                    "transform": {
+                                        "position": [
+                                            1.104193091392517,
+                                            1.7802538871765137,
+                                            6.82600212097168
+                                        ],
+                                        "rotation": [
+                                            0.999390830577064,
+                                            0.0,
+                                            0.0,
+                                            0.03489939481546997
+                                        ],
+                                        "scale": 1.0
+                                    },
+                                    "asset_path": "assets/e071469a36d3c8aa/nursinghome/yly/props/u_track/u_curtain_merged"
+                                },
+                                {
+                                    "name": "U_Curtain_merged_1",
+                                    "path": "/Group/StaticObjects/Furniture/U_Curtain_merged_1",
+                                    "type": "AssetActor",
+                                    "transform": {
+                                        "position": [
+                                            1.1053320169448853,
+                                            1.4470748901367188,
+                                            6.82600212097168
+                                        ],
+                                        "rotation": [
+                                            0.999390830577064,
+                                            0.0,
+                                            0.0,
+                                            0.03489939481546997
+                                        ],
+                                        "scale": 1.0
+                                    },
+                                    "asset_path": "assets/e071469a36d3c8aa/nursinghome/yly/props/u_track/u_curtain_merged"
+                                },
+                                {
+                                    "name": "Cabinet01",
+                                    "path": "/Group/StaticObjects/Furniture/Cabinet01",
+                                    "type": "AssetActor",
+                                    "transform": {
+                                        "position": [
+                                            2.2285141944885254,
+                                            -3.63446307182312,
+                                            4.0
+                                        ],
+                                        "rotation": [
+                                            1.0,
+                                            0.0,
+                                            0.0,
+                                            0.0
+                                        ],
+                                        "scale": 1.0
+                                    },
+                                    "asset_path": "assets/e071469a36d3c8aa/nursinghome/yly/props/cabinet/cabinet01"
+                                },
+                                {
+                                    "name": "Cabinet02",
+                                    "path": "/Group/StaticObjects/Furniture/Cabinet02",
+                                    "type": "AssetActor",
+                                    "transform": {
+                                        "position": [
+                                            -2.156090259552002,
+                                            -3.6233181953430176,
+                                            4.0
+                                        ],
+                                        "rotation": [
+                                            1.0,
+                                            0.0,
+                                            0.0,
+                                            0.0
+                                        ],
+                                        "scale": 1.0
+                                    },
+                                    "asset_path": "assets/e071469a36d3c8aa/nursinghome/yly/props/cabinet/cabinet02"
+                                },
+                                {
+                                    "name": "Desk",
+                                    "path": "/Group/StaticObjects/Furniture/Desk",
+                                    "type": "AssetActor",
+                                    "transform": {
+                                        "position": [
+                                            0.2513577938079834,
+                                            -3.63244104385376,
+                                            4.0
+                                        ],
+                                        "rotation": [
+                                            1.0,
+                                            0.0,
+                                            0.0,
+                                            0.0
+                                        ],
+                                        "scale": 1.0
+                                    },
+                                    "asset_path": "assets/e071469a36d3c8aa/nursinghome/yly/props/desk/desk"
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "name": "InteractiveObjects",
+                    "path": "/Group/InteractiveObjects",
+                    "type": "GroupActor",
+                    "transform": {
+                        "position": [
+                            0.0,
+                            0.0,
+                            0.0
+                        ],
+                        "rotation": [
+                            1.0,
+                            0.0,
+                            0.0,
+                            0.0
+                        ],
+                        "scale": 1.0
+                    },
+                    "children": [
+                        {
+                            "name": "Cuvette",
+                            "path": "/Group/InteractiveObjects/Cuvette",
+                            "type": "AssetActor",
+                            "transform": {
+                                "position": [
+                                    1.8306564092636108,
+                                    1.5556830167770386,
+                                    4.891963958740234
+                                ],
+                                "rotation": [
+                                    1.0,
+                                    0.0,
+                                    0.0,
+                                    0.0
+                                ],
+                                "scale": 1.0
+                            },
+                            "asset_path": "assets/e071469a36d3c8aa/nursinghome/yly/props/me_cuvette/cuvette"
+                        },
+                        {
+                            "name": "TestTubeRack",
+                            "path": "/Group/InteractiveObjects/TestTubeRack",
+                            "type": "AssetActor",
+                            "transform": {
+                                "position": [
+                                    1.818555235862732,
+                                    1.529235601425171,
+                                    4.827831268310547
+                                ],
+                                "rotation": [
+                                    1.0,
+                                    0.0,
+                                    0.0,
+                                    0.0
+                                ],
+                                "scale": 1.0
+                            },
+                            "asset_path": "assets/e071469a36d3c8aa/nursinghome/yly/props/me_cuvette/testtuberack"
+                        },
+                        {
+                            "name": "Wheelchair",
+                            "path": "/Group/InteractiveObjects/Wheelchair",
+                            "type": "AssetActor",
+                            "transform": {
+                                "position": [
+                                    0.35184741020202637,
+                                    -3.11458158493042,
+                                    4.012634754180908
+                                ],
+                                "rotation": [
+                                    1.0,
+                                    0.0,
+                                    0.0,
+                                    0.0
+                                ],
+                                "scale": 1.0
+                            },
+                            "asset_path": "assets/e071469a36d3c8aa/nursinghome/yly/props/wheelchair/wheelchair"
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
+}

@@ -63,6 +63,7 @@ def test_keyboard_teleop_parser_has_safe_defaults():
     assert args.func.__name__ == "_teleop"
     assert args.forward_speed == 0.5
     assert args.command_hold == 0.35
+    assert args.render_timeout == 10.0
     assert args.max_control_steps == 0
     assert args.no_preview is True
 

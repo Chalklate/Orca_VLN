@@ -693,6 +693,7 @@ def _add_renderer_options(parser: argparse.ArgumentParser) -> None:
         default="grpc-loopback",
     )
     parser.add_argument("--grpc-render-address")
+    parser.add_argument("--render-timeout", type=float, default=10.0)
     parser.add_argument("--orcagym-address", default="127.0.0.1:50051")
     parser.add_argument("--orcalab-edit-address", default="127.0.0.1:50151")
     parser.add_argument(
@@ -840,7 +841,6 @@ def _build_parser() -> argparse.ArgumentParser:
         default=100,
         help="zero-command Go2 policy steps after reset (original NaVILA default: 100)",
     )
-    run.add_argument("--render-timeout", type=float, default=10.0)
     run.add_argument(
         "--scene-ready",
         action="store_true",

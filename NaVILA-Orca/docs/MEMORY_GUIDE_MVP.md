@@ -71,6 +71,38 @@ default so the dog can inspect tables and kitchen counters. A different mount
 can be supplied with `--camera-mount-position X Y Z`; arguments supplied to the
 launcher take precedence over this default.
 
+## Teleop semantic map and multi-view patrols
+
+After a keyboard-teleop collection, the development launcher automatically
+rebuilds a pose-tagged semantic map from
+`outputs/memory_guide/latest-teleop/teleop.json` into
+`outputs/memory_guide/semantic_map.json`. When a search location matches a
+recorded location, its `front`, `left`, `rear`, and `right` anchors are retained
+as coverage metadata inside one location waypoint. The waypoint asks NaVILA to
+complete the visual sweep before advancing, while keeping a patrol over four
+search locations as four outer navigation stages.
+
+You can build the map explicitly:
+
+```bash
+./scripts/memory_guide.sh map-build \
+  --teleop-json outputs/memory_guide/latest-teleop/teleop.json \
+  --output outputs/memory_guide/semantic_map.json
+```
+
+Normal missions use it automatically:
+
+```bash
+./scripts/memory_guide_dev.sh run --query "Where is my bread?"
+```
+
+Use `--no-semantic-map` on the underlying memory-guide launcher to restore the
+legacy text-only patrol. Locations without a matching teleop anchor remain
+explicit text fallbacks; they are not silently mapped to a nearby location.
+The current NaVILA TCP protocol is an action-only navigation protocol, so the
+generated plan records all inspection frames and poses but does not yet run an
+independent object-verification model or update inventory automatically.
+
 ## MVP boundary
 
 This first version provides query routing, persistent memory, freshness logic,

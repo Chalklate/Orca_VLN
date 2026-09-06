@@ -13,12 +13,15 @@ import re
 import sys
 from typing import Any, Mapping, Sequence
 
+from .semantic_map import load_semantic_map, ordered_views, resolve_location
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_CATALOG = PROJECT_ROOT / "assets" / "memory_guide_catalog.json"
 DEFAULT_INVENTORY = PROJECT_ROOT / "outputs" / "memory_guide" / "inventory.json"
 DEFAULT_PLAN = PROJECT_ROOT / "outputs" / "memory_guide" / "latest_plan.json"
 DEFAULT_WAYPOINTS = PROJECT_ROOT / "outputs" / "memory_guide" / "latest_waypoints.txt"
+DEFAULT_SEMANTIC_MAP = PROJECT_ROOT / "outputs" / "memory_guide" / "semantic_map.json"
 
 _SPACE_RE = re.compile(r"\s+")
 _PUNCTUATION_RE = re.compile(r"[^a-z0-9\s-]")
@@ -225,6 +228,91 @@ def _patrol_waypoints(item_id: str, catalog: Mapping[str, Any]) -> list[str]:
     ]
 
 
+def _map_waypoints(
+    locations: Sequence[str],
+    *,
+    display_name: str,
+    semantic_map: Mapping[str, Any],
+) -> tuple[list[str], list[dict[str, Any]], list[str]]:
+    """Keep one navigation waypoint per search location.
+
+    The semantic map may contain several recorded camera views for a location,
+    but those views describe the coverage expected *inside* that location. They
+    must not become separate outer navigation stages: doing so causes a patrol
+    over a few locations to turn into a long list of waypoint prompts and
+    repeatedly resets the VLM's route context.
+    """
+
+    waypoints: list[str] = []
+    inspection_steps: list[dict[str, Any]] = []
+    unresolved: list[str] = []
+    for search_location in locations:
+        resolved = resolve_location(search_location, semantic_map)
+        if resolved is None:
+            unresolved.append(str(search_location))
+            waypoints.append(
+                (
+                    f"Go to {search_location}. Visually inspect the accessible surfaces "
+                    f"and nearby floor for the {display_name}. Stop after inspecting "
+                    "this search location."
+                )
+            )
+            inspection_steps.append(
+                {
+                    "search_location": str(search_location),
+                    "map_location": None,
+                    "view": None,
+                    "coverage": "text_fallback",
+                }
+            )
+            continue
+
+        location_id, location = resolved
+        views = ordered_views(location)
+        if not views:
+            views = [{"view": None, "anchor_id": None}]
+
+        view_names = [str(view.get("view") or "current") for view in views]
+        if len(view_names) == 1:
+            coverage_hint = f"the recorded {view_names[0]} view"
+        else:
+            coverage_hint = (
+                "the recorded "
+                + ", ".join(view_names[:-1])
+                + f", and {view_names[-1]} views"
+            )
+        waypoints.append(
+            (
+                f"Go to the recorded {location['display_name']} search location "
+                f"for {search_location} and settle in clear floor space. Perform a "
+                f"complete visual sweep using {coverage_hint}. Visually inspect "
+                f"all accessible surfaces and the nearby floor for the {display_name}. "
+                "Stop after this search location has been fully inspected; do not "
+                "advance to another search location."
+            )
+        )
+        inspection_steps.append(
+            {
+                "search_location": str(search_location),
+                "map_location": location_id,
+                "views": [
+                    {
+                        "view": str(view.get("view") or "current"),
+                        "anchor_id": view.get("anchor_id"),
+                        "image_path": view.get("image_path"),
+                        "pose": {
+                            "root_pos_world": view.get("root_pos_world"),
+                            "base_rpy": view.get("base_rpy"),
+                        },
+                    }
+                    for view in views
+                ],
+                "coverage": "recorded_location_all_views",
+            }
+        )
+    return waypoints, inspection_steps, unresolved
+
+
 def plan_query(
     query: str,
     *,
@@ -233,6 +321,7 @@ def plan_query(
     confidence_threshold: float = 0.65,
     max_age_hours: float = 24.0,
     now: datetime | None = None,
+    semantic_map: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Route a natural request to direct guidance or a staged patrol."""
 
@@ -292,18 +381,32 @@ def plan_query(
         }
         if reliable:
             display_name = _display_name(parsed.target, catalog)
+            waypoints = [
+                (
+                    f"Go to {observation['location']}. Look for the {display_name}, "
+                    "approach only through clear floor space, and stop about one meter away."
+                )
+            ]
             plan.update(
                 mode="direct_item",
                 reason="recent, confident inventory observation",
-                waypoints=[
-                    (
-                        f"Go to {observation['location']}. Look for the {display_name}, "
-                        "approach only through clear floor space, and stop about one meter away."
-                    )
-                ],
+                waypoints=waypoints,
             )
+            if semantic_map is not None:
+                mapped_waypoints, steps, unresolved = _map_waypoints(
+                    [str(observation["location"])],
+                    display_name=display_name,
+                    semantic_map=semantic_map,
+                )
+                if steps and any(step["map_location"] for step in steps):
+                    plan["waypoints"] = mapped_waypoints
+                    plan["inspection_policy"] = "recorded_views_requires_visual_verification"
+                    plan["inspection_steps"] = steps
+                    plan["unresolved_locations"] = unresolved
+                    plan["semantic_map_used"] = True
             return plan
 
+    locations = catalog.get("default_search_locations", [])
     plan.update(
         mode="patrol_item",
         reason=(
@@ -313,6 +416,20 @@ def plan_query(
         ),
         waypoints=_patrol_waypoints(parsed.target, catalog),
     )
+    if semantic_map is not None:
+        entry = catalog.get("items", {}).get(parsed.target, {})
+        mapped_locations = entry.get("search_locations") or locations
+        mapped_waypoints, steps, unresolved = _map_waypoints(
+            [str(location) for location in mapped_locations],
+            display_name=_display_name(parsed.target, catalog),
+            semantic_map=semantic_map,
+        )
+        if steps and any(step["map_location"] for step in steps):
+            plan["waypoints"] = mapped_waypoints
+            plan["inspection_policy"] = "recorded_views_requires_visual_verification"
+            plan["inspection_steps"] = steps
+            plan["unresolved_locations"] = unresolved
+            plan["semantic_map_used"] = True
     return plan
 
 
@@ -336,6 +453,11 @@ def _build_parser() -> argparse.ArgumentParser:
     plan.add_argument("--query", required=True)
     plan.add_argument("--confidence-threshold", type=float, default=0.65)
     plan.add_argument("--max-age-hours", type=float, default=24.0)
+    plan.add_argument(
+        "--semantic-map",
+        type=Path,
+        help="pose-tagged teleop semantic map used to annotate locations with recorded views",
+    )
     plan.add_argument("--plan-output", type=Path, default=DEFAULT_PLAN)
     plan.add_argument("--waypoint-output", type=Path, default=DEFAULT_WAYPOINTS)
 
@@ -346,6 +468,12 @@ def _build_parser() -> argparse.ArgumentParser:
     remember.add_argument("--confidence", type=float, default=1.0)
     remember.add_argument("--evidence-frame")
     remember.add_argument("--observed-at")
+
+    map_build = subparsers.add_parser(
+        "map-build", help="convert a teleop.json collection into a semantic map"
+    )
+    map_build.add_argument("--teleop-json", type=Path, required=True)
+    map_build.add_argument("--output", type=Path, default=DEFAULT_SEMANTIC_MAP)
 
     subparsers.add_parser("list", help="show remembered item observations")
     return parser
@@ -367,9 +495,30 @@ def main(argv: Sequence[str] | None = None) -> int:
                 inventory=inventory,
                 confidence_threshold=args.confidence_threshold,
                 max_age_hours=args.max_age_hours,
+                semantic_map=(
+                    load_semantic_map(args.semantic_map)
+                    if args.semantic_map is not None
+                    else None
+                ),
             )
             write_plan(plan, args.plan_output, args.waypoint_output)
             print(json.dumps(plan, indent=2, ensure_ascii=False))
+            return 0
+        if args.command == "map-build":
+            from .semantic_map import build_semantic_map_from_file
+
+            semantic_map = build_semantic_map_from_file(args.teleop_json, args.output)
+            print(
+                json.dumps(
+                    {
+                        "output": str(Path(args.output).expanduser().resolve()),
+                        "anchor_count": semantic_map["anchor_count"],
+                        "location_count": semantic_map["location_count"],
+                        "locations": semantic_map["route_order"],
+                    },
+                    indent=2,
+                )
+            )
             return 0
         if args.command == "remember":
             item_id = _resolve_alias(args.item, catalog.get("items", {}))

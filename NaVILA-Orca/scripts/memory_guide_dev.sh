@@ -43,6 +43,10 @@ Environment overrides:
   NAVILA_AWS_REGION          AWS region (default: ap-northeast-1)
   NAVILA_DEV_START_TIMEOUT   Service startup timeout in seconds
 
+Completed teleop data is consumed automatically from
+outputs/memory_guide/latest-teleop/teleop.json and rebuilt as a semantic map
+for each run. Pass --no-semantic-map to run the legacy text-only patrol.
+
 "start" stays in the foreground as the service supervisor. Run it in a
 dedicated terminal or as an attached background task.
 EOF

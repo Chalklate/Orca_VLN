@@ -11,6 +11,9 @@ QUERY=""
 INVENTORY="${NAVILA_MEMORY_INVENTORY:-${PROJECT_ROOT}/outputs/memory_guide/inventory.json}"
 PLAN_OUTPUT="${PROJECT_ROOT}/outputs/memory_guide/latest_plan.json"
 WAYPOINT_OUTPUT="${PROJECT_ROOT}/outputs/memory_guide/latest_waypoints.txt"
+SEMANTIC_MAP="${NAVILA_SEMANTIC_MAP:-${PROJECT_ROOT}/outputs/memory_guide/semantic_map.json}"
+TELEOP_JSON="${NAVILA_TELEOP_JSON:-${PROJECT_ROOT}/outputs/memory_guide/latest-teleop/teleop.json}"
+USE_SEMANTIC_MAP=true
 PLAN_ONLY=false
 RUN_ARGS=()
 CAMERA_ARGS=(
@@ -28,6 +31,9 @@ Memory options:
   --plan-output PATH        Structured mission-plan output
   --waypoint-output PATH    Generated NaVILA waypoint file
   --plan-only               Generate the plan without starting locomotion
+  --semantic-map PATH       Use a pose-tagged teleop map (auto-built by default)
+  --teleop-json PATH        Teleop collection used to rebuild the semantic map
+  --no-semantic-map         Use the legacy text-only patrol plan
 
 The Memory Guide camera defaults to a stabilized 1.2 m vertical mount offset.
 All other arguments are forwarded to run_orcalab_scene_locomotion.sh, and
@@ -61,6 +67,28 @@ while (($#)); do
       WAYPOINT_OUTPUT="$2"
       shift 2
       ;;
+    --semantic-map)
+      [[ $# -ge 2 ]] || { echo "--semantic-map requires a value" >&2; exit 2; }
+      SEMANTIC_MAP="$2"
+      shift 2
+      ;;
+    --semantic-map=*)
+      SEMANTIC_MAP="${1#*=}"
+      shift
+      ;;
+    --teleop-json)
+      [[ $# -ge 2 ]] || { echo "--teleop-json requires a value" >&2; exit 2; }
+      TELEOP_JSON="$2"
+      shift 2
+      ;;
+    --teleop-json=*)
+      TELEOP_JSON="${1#*=}"
+      shift
+      ;;
+    --no-semantic-map)
+      USE_SEMANTIC_MAP=false
+      shift
+      ;;
     --plan-only)
       PLAN_ONLY=true
       shift
@@ -81,10 +109,30 @@ if [[ -z "${QUERY}" ]]; then
   exit 2
 fi
 
+MAP_ARGS=()
+MAP_RUN_ARGS=()
+if [[ "${USE_SEMANTIC_MAP}" == true ]]; then
+  if [[ -f "${TELEOP_JSON}" ]]; then
+    "${NAVILA_ORCA_PYTHON}" -m navila_orca.memory_guide \
+      map-build \
+      --teleop-json "${TELEOP_JSON}" \
+      --output "${SEMANTIC_MAP}"
+  fi
+  if [[ -f "${SEMANTIC_MAP}" ]]; then
+    MAP_ARGS=(--semantic-map "${SEMANTIC_MAP}")
+    # Recorded views guide coverage inside one location waypoint.
+    # Options supplied after these defaults can still override them.
+    MAP_RUN_ARGS=(--max-decisions 64 --max-control-steps 2000)
+  else
+    echo "Semantic map not found; using legacy text-only patrol plan: ${SEMANTIC_MAP}" >&2
+  fi
+fi
+
 "${NAVILA_ORCA_PYTHON}" -m navila_orca.memory_guide \
   --inventory "${INVENTORY}" \
   plan \
   --query "${QUERY}" \
+  "${MAP_ARGS[@]}" \
   --plan-output "${PLAN_OUTPUT}" \
   --waypoint-output "${WAYPOINT_OUTPUT}"
 
@@ -97,4 +145,5 @@ fi
 exec "${SCRIPT_DIR}/run_orcalab_scene_locomotion.sh" \
   --waypoint-instruction-file "${WAYPOINT_OUTPUT}" \
   "${CAMERA_ARGS[@]}" \
+  "${MAP_RUN_ARGS[@]}" \
   "${RUN_ARGS[@]}"

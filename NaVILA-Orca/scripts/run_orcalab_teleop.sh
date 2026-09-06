@@ -20,7 +20,7 @@ exec "${NAVILA_ORCA_PYTHON}" -m navila_orca.cli teleop \
   --camera-asset-path prefabs/mujococamera1080 \
   --orcalab-camera-mode mujoco-png \
   --camera-transport grpc-png \
-  --camera-mount-position 0.1 0 1.2 \
+  --camera-mount-position 0.1 0 1.0 \
   --stabilize-camera-horizon \
   --no-publish \
   --robot-actor-name auto \

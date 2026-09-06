@@ -21,6 +21,7 @@ from .backends.mjlab_go2 import (
     MjlabGo2Backend,
 )
 from .contracts import RenderFrame, RobotState
+from .decision_dataset import DecisionDatasetRecorder
 from .episodes import DEFAULT_SCENARIO, load_episode
 from .live_monitor import LiveNavigationMonitor
 from .paths import BUNDLED_GO2_XML, DEFAULT_GLOBAL_SETTINGS
@@ -311,6 +312,19 @@ def _run(args: argparse.Namespace) -> int:
     )
     output_dir = _resolve_output_dir(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
+    history_warmup_frames = (
+        8 if args.history_warmup_frames is None and args.collect_decisions else
+        (args.history_warmup_frames or 0)
+    )
+    decision_recorder = None
+    decision_samples_dir: Path | None = None
+    if args.collect_decisions:
+        decision_samples_dir = output_dir / "decision_samples"
+        decision_recorder = DecisionDatasetRecorder(
+            decision_samples_dir,
+            episode_id=episode.episode_id,
+            scene_id=episode.scene_id,
+        )
 
     backend = MjlabGo2Backend(
         checkpoint=args.checkpoint,
@@ -353,6 +367,10 @@ def _run(args: argparse.Namespace) -> int:
             decouple_vlm=args.decouple_vlm,
             waypoint_instructions=waypoint_instructions,
             instruction_provider=instruction_provider,
+            history_warmup_frames=history_warmup_frames,
+            decision_recorder=decision_recorder.record
+            if decision_recorder is not None
+            else None,
         )
         result = runner.run(episode)
         artifact_id = datetime.now().strftime("%Y%m%d-%H%M%S-%f")
@@ -436,6 +454,8 @@ def _run(args: argparse.Namespace) -> int:
                 "image_interval": args.image_interval,
                 "max_control_steps": args.max_control_steps,
                 "max_decisions": args.max_decisions,
+                "collect_decisions": bool(args.collect_decisions),
+                "history_warmup_frames": history_warmup_frames,
                 "live_monitor": args.live_monitor,
                 "monitor_interval": args.monitor_interval,
                 "render_backend": args.render_backend,
@@ -448,6 +468,16 @@ def _run(args: argparse.Namespace) -> int:
                 "pose_pushes": renderer.pose_pushes,
                 "scene_fidelity": scene_fidelity,
                 "physics_alignment": backend.alignment_report,
+                "decision_samples_directory": (
+                    str(decision_samples_dir)
+                    if decision_samples_dir is not None
+                    else None
+                ),
+                "decision_samples": (
+                    len(decision_recorder.records)
+                    if decision_recorder is not None
+                    else 0
+                ),
             },
             "limitations": []
             if scene_fidelity
@@ -718,7 +748,7 @@ def _add_renderer_options(parser: argparse.ArgumentParser) -> None:
         nargs=3,
         metavar=("X", "Y", "Z"),
         default=list(DEFAULT_CAMERA_MOUNT_POSITION),
-        help="Go2 base-frame camera translation (default: 0.1 0 0.6)",
+        help="Go2 base-frame camera translation (default: 0.1 0 1.0)",
     )
     parser.add_argument(
         "--camera-mount-quat-wxyz",
@@ -726,7 +756,7 @@ def _add_renderer_options(parser: argparse.ArgumentParser) -> None:
         nargs=4,
         metavar=("W", "X", "Y", "Z"),
         default=list(DEFAULT_CAMERA_MOUNT_QUAT_WXYZ),
-        help="Go2 base-frame camera rotation in wxyz order",
+        help="Go2 base-frame camera rotation in wxyz order (default includes 20-degree downward pitch)",
     )
     parser.add_argument(
         "--stabilize-camera-horizon",
@@ -857,6 +887,23 @@ def _build_parser() -> argparse.ArgumentParser:
         help="canonical action; repeat for a deterministic smoke sequence",
     )
     run.add_argument("--image-interval", type=float, default=0.5)
+    run.add_argument(
+        "--collect-decisions",
+        action="store_true",
+        help=(
+            "save the exact eight images sent to NaVILA for every decision, "
+            "with an empty human target_action for later review"
+        ),
+    )
+    run.add_argument(
+        "--history-warmup-frames",
+        type=int,
+        default=None,
+        help=(
+            "real stationary frames to collect before the first and each "
+            "new waypoint decision; --collect-decisions defaults to 8"
+        ),
+    )
     run.add_argument(
         "--state-stream-interval",
         type=float,

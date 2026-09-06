@@ -21,7 +21,7 @@ from .contracts import (
     VelocityPhysicsBackend,
     VelocityCommand,
 )
-from .frames import sample_history
+from .frames import sample_history_with_step_ids
 from .metrics import MetricValue, NavigationMetrics
 
 
@@ -107,6 +107,8 @@ class NavigationRunner:
         action_parser: Callable[[str], VelocityCommand] = parse_velocity_command,
         waypoint_instructions: Sequence[str] | None = None,
         instruction_provider: Callable[[], str] | None = None,
+        history_warmup_frames: int = 0,
+        decision_recorder: Callable[..., None] | None = None,
     ) -> None:
         self.physics = physics
         self.renderer = renderer
@@ -125,6 +127,12 @@ class NavigationRunner:
         self.monitor_interval_s = float(monitor_interval_s)
         self.decouple_vlm = bool(decouple_vlm)
         self.action_parser = action_parser
+        self.history_warmup_frames = int(history_warmup_frames)
+        if self.history_warmup_frames < 0:
+            raise ValueError("history_warmup_frames must be non-negative")
+        self.decision_recorder = decision_recorder
+        if decision_recorder is not None and not callable(decision_recorder):
+            raise TypeError("decision_recorder must be callable")
         if instruction_provider is not None and not callable(instruction_provider):
             raise TypeError("instruction_provider must be callable")
         self.instruction_provider = instruction_provider
@@ -251,6 +259,9 @@ class NavigationRunner:
         current_instruction = active_instruction()
         ready_output: str | None = None
         ready_instruction: str | None = None
+        ready_sampled_images: list[Any] | None = None
+        ready_sampled_step_ids: list[int | None] | None = None
+        ready_decision_state: RobotState | None = None
         if self.monitor is not None:
             self.monitor.update(
                 initial_frame,
@@ -340,16 +351,48 @@ class NavigationRunner:
                 )
             return True, physics_done, measured
 
+        def warm_frame_history() -> None:
+            """Capture real stationary frames before the next VLM request."""
+
+            if self.history_warmup_frames <= 0:
+                return
+            zero_command = VelocityCommand(0.0, 0.0, 0.0, 0.0)
+            if self._velocity_facade:
+                self.physics.set_velocity_command(zero_command)
+            while len(frame_history) < self.history_warmup_frames:
+                did_step, physics_done, _ = advance_one_tick(
+                    zero_command,
+                    status="collecting VLM frame history",
+                )
+                if not did_step or physics_done:
+                    break
+            if len(frame_history) < self.history_warmup_frames:
+                raise TimingError(
+                    "could not collect the requested VLM frame history; "
+                    "increase --max-control-steps or reduce --image-interval"
+                )
+
+        warm_frame_history()
+
         while self.max_decisions is None or decisions < self.max_decisions:
             if ready_output is not None:
                 raw_output = ready_output
                 current_instruction = ready_instruction or current_instruction
+                sampled_images = ready_sampled_images
+                sampled_step_ids = ready_sampled_step_ids
+                decision_state = ready_decision_state or state
                 ready_output = None
                 ready_instruction = None
+                ready_sampled_images = None
+                ready_sampled_step_ids = None
+                ready_decision_state = None
             else:
                 if decisions:
                     current_instruction = active_instruction()
-                sampled_images = sample_history(frame_history)
+                sampled_images, sampled_step_ids = sample_history_with_step_ids(
+                    frame_history
+                )
+                decision_state = state
                 if self.monitor is not None:
                     self.monitor.update(
                         last_frame,
@@ -376,6 +419,18 @@ class NavigationRunner:
             raw_outputs.append(raw_output)
             decisions += 1
             command = self.action_parser(raw_output)
+            if self.decision_recorder is not None:
+                if sampled_images is None or sampled_step_ids is None:
+                    raise RuntimeError("decision frame history was not retained")
+                self.decision_recorder(
+                    decision=decisions,
+                    instruction=current_instruction,
+                    images=sampled_images,
+                    frame_step_ids=sampled_step_ids,
+                    state=decision_state,
+                    baseline_output=raw_output,
+                    command=command,
+                )
             monitor_output = raw_output
             monitor_command = self._command_text(command)
 
@@ -425,6 +480,7 @@ class NavigationRunner:
                     # Start the next visual subgoal from the confirmed waypoint
                     # instead of carrying an image history biased toward the old one.
                     frame_history = [last_frame]
+                    warm_frame_history()
                     monitor_output = (
                         f"Waypoint {waypoints_completed}/{waypoint_count} completed"
                     )
@@ -557,7 +613,10 @@ class NavigationRunner:
                 # zero-velocity watchdog instead of extending the old action.
                 next_instruction = active_instruction()
                 current_instruction = next_instruction
-                sampled_images = sample_history(frame_history)
+                sampled_images, sampled_step_ids = sample_history_with_step_ids(
+                    frame_history
+                )
+                decision_state = state
                 if self.monitor is not None:
                     monitor_command = "zero-velocity watchdog"
                     self.monitor.update(
@@ -594,6 +653,9 @@ class NavigationRunner:
                     if not physics_done:
                         ready_output = inference_future.result()
                         ready_instruction = next_instruction
+                        ready_sampled_images = sampled_images
+                        ready_sampled_step_ids = sampled_step_ids
+                        ready_decision_state = decision_state
                 finally:
                     inference_pool.shutdown(wait=True, cancel_futures=True)
 

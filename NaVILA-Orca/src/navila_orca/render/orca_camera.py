@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import math
 import os
 import socket
 import tempfile
@@ -30,13 +31,20 @@ from PIL import Image
 DEFAULT_CAMERA_ACTOR_NAME = "navila_ego"
 DEFAULT_CAMERA_ASSET = "prefabs/agentcamera"
 # The Go2 base sits roughly 0.4 m above the floor in the standing scene, so a
-# 0.8 m base-frame mount gives an approximately 1.2 m camera height.
-DEFAULT_CAMERA_MOUNT_POSITION = (0.1, 0.0, 0.8)
+# 1.0 m base-frame mount gives an approximately 1.4 m camera height.
+DEFAULT_CAMERA_MOUNT_POSITION = (0.1, 0.0, 1.0)
 # The NavVLM camera uses (-0.5, 0.5, -0.5, 0.5) under its source camera-frame
 # convention. Orca's CameraSensor post-multiplies AtomToRos, so
 # the equivalent forward +X / image-up +Z entity rotation is yaw -90 degrees.
+# Apply a 20-degree downward pitch about the Go2 base Y axis before that yaw.
 _SQRT_HALF = float(2.0**-0.5)
-DEFAULT_CAMERA_MOUNT_QUAT_WXYZ = (_SQRT_HALF, 0.0, 0.0, -_SQRT_HALF)
+_PITCH_HALF = math.radians(20.0 / 2.0)
+DEFAULT_CAMERA_MOUNT_QUAT_WXYZ = (
+    math.cos(_PITCH_HALF) * _SQRT_HALF,
+    -math.sin(_PITCH_HALF) * _SQRT_HALF,
+    math.sin(_PITCH_HALF) * _SQRT_HALF,
+    -math.cos(_PITCH_HALF) * _SQRT_HALF,
+)
 _PNG_IEND_TRAILER = b"\x00\x00\x00\x00IEND\xaeB`\x82"
 
 

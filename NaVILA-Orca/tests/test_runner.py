@@ -358,6 +358,30 @@ def test_zero_limits_run_until_vlm_stop():
 
     assert result.termination_reason == "stop"
     assert result.control_steps == 25
+
+
+def test_collection_warmup_records_exact_eight_real_decision_frames():
+    samples = []
+
+    def record(**sample):
+        samples.append(sample)
+
+    result = NavigationRunner(
+        FakePhysics(),
+        FakeRenderer(),
+        ScriptedVLM(["move forward 25 cm", "stop"]),
+        scene_fidelity=False,
+        image_interval_s=0.02,
+        history_warmup_frames=8,
+        decision_recorder=record,
+    ).run(_episode())
+
+    assert result.termination_reason == "stop"
+    assert len(samples) == 2
+    assert all(len(sample["images"]) == 8 for sample in samples)
+    assert samples[0]["frame_step_ids"] == list(range(8))
+    assert all(step_id is not None for step_id in samples[0]["frame_step_ids"])
+    assert samples[0]["state"].step_id == 7
     assert result.decisions == 2
 
 

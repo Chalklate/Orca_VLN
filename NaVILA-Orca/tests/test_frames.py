@@ -5,7 +5,13 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from navila_orca.frames import encode_images_jpeg_base64, sample_history, to_rgb_image
+from navila_orca.frames import (
+    encode_images_jpeg_base64,
+    sample_history,
+    sample_history_with_step_ids,
+    to_rgb_image,
+)
+from navila_orca.contracts import RenderFrame
 
 
 def _frame(value: int) -> Image.Image:
@@ -25,6 +31,20 @@ def test_short_history_is_left_padded_to_exactly_eight():
 def test_long_history_uses_exact_navila_uniform_indices_and_latest():
     sampled = sample_history([_frame(index) for index in range(12)])
     assert [_value(image) for image in sampled] == [0, 1, 3, 4, 6, 7, 9, 11]
+
+
+def test_history_sidecar_reports_source_steps_and_padding():
+    frames = [
+        RenderFrame(
+            step_id=index,
+            sim_time_s=index * 0.02,
+            camera_id="ego",
+            rgb=np.full((6, 8, 3), index, dtype=np.uint8),
+        )
+        for index in (10, 20, 30)
+    ]
+    _, step_ids = sample_history_with_step_ids(frames)
+    assert step_ids == [None, None, None, None, None, 10, 20, 30]
 
 
 def test_float_rgb_conversion_matches_benchmark_scaling_rule():

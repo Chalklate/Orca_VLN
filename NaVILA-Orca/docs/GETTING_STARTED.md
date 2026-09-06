@@ -174,7 +174,7 @@ Important defaults:
 | --- | --- | --- |
 | `--robot-actor-name auto` | requires exactly one complete Go2 in the scene | prevents controlling the wrong actor |
 | `--camera-asset-path prefabs/mujococamera1080` | creates once and captures PNG continuously | uses robot ego view, not the viewport |
-| default camera mount `0.1 0 0.6` | approximately 1 m above the floor in the standing scene | gives the VLM a slightly higher view of tables and counters |
+| default camera mount `0.1 0 1.0` with 20-degree downward pitch | approximately 1.4 m above the floor in the standing scene | gives the VLM a higher, table-facing view |
 | `--warmup-steps 100` | executes 100 zero-velocity policy steps before motion | stabilizes policy state before VLM commands |
 | `--scene-profile orca-train` | 200 Hz physics and 50 Hz control | makes action distance reproducible by tick |
 

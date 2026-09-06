@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import io
 from collections.abc import Sequence
+from typing import Any
 
 import numpy as np
 from PIL import Image
@@ -52,17 +53,44 @@ def sample_history(
     with ``floor(i * (N - 1) / 7)`` and the latest frame is appended.
     """
 
+    sampled, _ = sample_history_with_step_ids(images)
+    return sampled
+
+
+def sample_history_with_step_ids(
+    images: Sequence[Image.Image | RenderFrame | np.ndarray],
+) -> tuple[list[Image.Image], list[int | None]]:
+    """Return the eight sampled images and their source physics step IDs.
+
+    ``None`` identifies a synthetic black padding frame.  The step-ID sidecar
+    is used by the collection recorder to prove which simulator observations
+    were sent to NaVILA; it does not change the model input.
+    """
+
     if not images:
         raise ValueError("cannot sample an empty image history")
     frames = [to_rgb_image(image) for image in images]
+    step_ids: list[int | None] = [
+        _frame_step_id(image) for image in images
+    ]
     while len(frames) < NUM_VIDEO_FRAMES:
         frames.insert(0, Image.new("RGB", frames[-1].size, (0, 0, 0)))
+        step_ids.insert(0, None)
 
     count = len(frames)
     indices = [int(index * (count - 1) / 7) for index in range(7)]
     sampled = [frames[index] for index in indices]
     sampled.append(frames[-1])
-    return sampled
+    sampled_step_ids = [step_ids[index] for index in indices]
+    sampled_step_ids.append(step_ids[-1])
+    return sampled, sampled_step_ids
+
+
+def _frame_step_id(image: Any) -> int | None:
+    """Read a physics step ID when the source item carries one."""
+
+    value = getattr(image, "step_id", None)
+    return int(value) if value is not None else None
 
 
 def encode_jpeg_base64(image: Image.Image | RenderFrame | np.ndarray) -> str:

@@ -15,15 +15,26 @@ from navila_orca.render.orca_camera import (
     _OrcaRuntime,
     _read_complete_png,
     compose_camera_pose,
+    rotate_vector_wxyz,
 )
 
 
 def test_compose_camera_pose_matches_orca_forward_mount_at_identity() -> None:
     position, quat = compose_camera_pose([1.0, 2.0, 0.4], [1.0, 0.0, 0.0, 0.0])
-    np.testing.assert_allclose(position, [1.1, 2.0, 1.0], atol=1.0e-12)
+    np.testing.assert_allclose(position, [1.1, 2.0, 1.4], atol=1.0e-12)
     np.testing.assert_allclose(
         quat,
-        [np.sqrt(0.5), 0.0, 0.0, -np.sqrt(0.5)],
+        [
+            np.cos(np.deg2rad(10.0)) * np.sqrt(0.5),
+            -np.sin(np.deg2rad(10.0)) * np.sqrt(0.5),
+            np.sin(np.deg2rad(10.0)) * np.sqrt(0.5),
+            -np.cos(np.deg2rad(10.0)) * np.sqrt(0.5),
+        ],
+        atol=1.0e-12,
+    )
+    np.testing.assert_allclose(
+        rotate_vector_wxyz(quat, [0.0, 1.0, 0.0]),
+        [np.cos(np.deg2rad(20.0)), 0.0, -np.sin(np.deg2rad(20.0))],
         atol=1.0e-12,
     )
 
@@ -31,7 +42,7 @@ def test_compose_camera_pose_matches_orca_forward_mount_at_identity() -> None:
 def test_compose_camera_pose_rotates_mount_with_go2_base() -> None:
     root_quat = [np.sqrt(0.5), 0.0, 0.0, np.sqrt(0.5)]
     position, quat = compose_camera_pose([0.0, 0.0, 0.4], root_quat)
-    np.testing.assert_allclose(position, [0.0, 0.1, 1.0], atol=1.0e-12)
+    np.testing.assert_allclose(position, [0.0, 0.1, 1.4], atol=1.0e-12)
     assert np.isclose(np.linalg.norm(quat), 1.0)
 
 
@@ -75,10 +86,15 @@ def test_compose_camera_pose_can_reject_base_roll_from_camera_orientation() -> N
 
     # The mount position remains physically attached and therefore moves with
     # base roll, while image orientation is identical to a level, zero-yaw base.
-    assert not np.allclose(position, [0.1, 0.0, 1.0])
+    assert not np.allclose(position, [0.1, 0.0, 1.4])
     np.testing.assert_allclose(
         quat,
-        [np.sqrt(0.5), 0.0, 0.0, -np.sqrt(0.5)],
+        [
+            np.cos(np.deg2rad(10.0)) * np.sqrt(0.5),
+            -np.sin(np.deg2rad(10.0)) * np.sqrt(0.5),
+            np.sin(np.deg2rad(10.0)) * np.sqrt(0.5),
+            -np.cos(np.deg2rad(10.0)) * np.sqrt(0.5),
+        ],
         atol=1.0e-12,
     )
 
@@ -248,7 +264,7 @@ def test_follower_provisions_rgb_only_camera_and_updates_root_actor() -> None:
         assert configured["DepthCamera"] is False
 
         position, _quat = follower.update([1.0, 2.0, 0.4], [1.0, 0.0, 0.0, 0.0])
-        np.testing.assert_allclose(position, [1.1, 2.0, 1.0])
+        np.testing.assert_allclose(position, [1.1, 2.0, 1.4])
         paths, transforms = service.transform_calls[-1]
         assert paths[0].string() == "/navila_ego"
         np.testing.assert_allclose(transforms[0].position, position)

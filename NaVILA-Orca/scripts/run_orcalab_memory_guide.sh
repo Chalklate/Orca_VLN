@@ -32,7 +32,7 @@ USE_SEMANTIC_MAP=true
 PLAN_ONLY=false
 RUN_ARGS=()
 CAMERA_ARGS=(
-  --camera-mount-position 0.1 0 1.2
+  --camera-mount-position 0.1 0 1.0
   --stabilize-camera-horizon
 )
 
@@ -64,7 +64,9 @@ Memory options:
   --teleop-json PATH        Teleop collection used to rebuild the semantic map
   --no-semantic-map         Use the legacy text-only patrol plan
 
-The Memory Guide camera defaults to a stabilized 1.2 m vertical mount offset.
+The Memory Guide camera defaults to a stabilized 1.0 m base-frame mount offset
+(approximately 1.4 m above the floor in the standing scene) with a 20-degree
+downward pitch.
 All other arguments are forwarded to run_orcalab_scene_locomotion.sh, and
 later camera arguments override these defaults.
 EOF

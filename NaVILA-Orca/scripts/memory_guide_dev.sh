@@ -451,6 +451,10 @@ summary = {
     "waypoints_completed": payload.get("waypoints_completed"),
     "waypoint_count": payload.get("waypoint_count"),
     "captured_frames": payload.get("runtime", {}).get("captured_frames"),
+    "decision_samples": payload.get("runtime", {}).get("decision_samples", 0),
+    "decision_samples_directory": payload.get("runtime", {}).get(
+        "decision_samples_directory"
+    ),
     "metrics": payload.get("metrics"),
     "final_position": payload.get("final_state", {}).get("root_pos_world"),
 }

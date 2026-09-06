@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+import time
 from typing import Any, Callable, Sequence
 
 import numpy as np
@@ -101,6 +103,7 @@ class NavigationRunner:
         max_decisions: int = 200,
         monitor: Any | None = None,
         monitor_interval_s: float = 0.1,
+        decouple_vlm: bool = False,
         action_parser: Callable[[str], VelocityCommand] = parse_velocity_command,
         waypoint_instructions: Sequence[str] | None = None,
         instruction_provider: Callable[[], str] | None = None,
@@ -120,6 +123,7 @@ class NavigationRunner:
         self.max_decisions = None if requested_decisions == 0 else requested_decisions
         self.monitor = monitor
         self.monitor_interval_s = float(monitor_interval_s)
+        self.decouple_vlm = bool(decouple_vlm)
         self.action_parser = action_parser
         if instruction_provider is not None and not callable(instruction_provider):
             raise TypeError("instruction_provider must be callable")
@@ -245,6 +249,8 @@ class NavigationRunner:
             return instruction
 
         current_instruction = active_instruction()
+        ready_output: str | None = None
+        ready_instruction: str | None = None
         if self.monitor is not None:
             self.monitor.update(
                 initial_frame,
@@ -256,32 +262,117 @@ class NavigationRunner:
                 chunk_result=monitor_chunk_result,
             )
 
+        def advance_one_tick(
+            command: VelocityCommand,
+            *,
+            status: str,
+        ) -> tuple[bool, bool, bool]:
+            """Advance one physics tick and service the render/monitor cadence."""
+
+            nonlocal state, last_frame, control_steps, termination_reason
+            if (
+                self.max_control_steps is not None
+                and control_steps >= self.max_control_steps
+            ):
+                termination_reason = "max_control_steps"
+                return False, True, False
+
+            if self._velocity_facade:
+                raw_step = self.physics.step()
+            else:
+                terrain = np.asarray(
+                    self.physics.terrain_features(state), dtype=np.float64
+                )
+                action = np.asarray(
+                    self.locomotion_policy.act(state, terrain, command),
+                    dtype=np.float64,
+                )
+                if action.ndim != 1 or not np.all(np.isfinite(action)):
+                    raise ValueError(
+                        "locomotion policy action must be a finite one-dimensional array"
+                    )
+                raw_step = self.physics.step(action)
+            step = (
+                raw_step
+                if isinstance(raw_step, PhysicsStep)
+                else PhysicsStep(raw_step)
+            )
+            if step.state.step_id <= state.step_id:
+                raise RuntimeError(
+                    "physics state step_id must increase monotonically"
+                )
+            state = step.state
+            control_steps += 1
+            auto_reset_state = bool(step.info.get("auto_reset_state", False))
+            measured = not ((step.terminated or step.truncated) and auto_reset_state)
+            if measured:
+                metrics.update(state.root_pos_world)
+
+                capture_due = control_steps % capture_ticks == 0
+                monitor_due = (
+                    monitor_ticks is not None
+                    and control_steps % monitor_ticks == 0
+                )
+                stream_due = control_steps % stream_ticks == 0
+                if stream_due or capture_due or monitor_due:
+                    self._push_state(state)
+                if capture_due or monitor_due:
+                    # A split bridge captures the frame produced after the most
+                    # recent pose push. Legacy bridges render synchronously here.
+                    last_frame = self._capture(state, record=capture_due)
+                    if capture_due:
+                        frame_history.append(last_frame)
+                    if self.monitor is not None:
+                        self.monitor.update(
+                            last_frame,
+                            instruction=current_instruction,
+                            vlm_output=monitor_output,
+                            command=monitor_command,
+                            status=status,
+                            decision=decisions,
+                            chunk_result=monitor_chunk_result,
+                        )
+
+            physics_done = bool(step.terminated or step.truncated)
+            if physics_done:
+                termination_reason = (
+                    "terminated" if step.terminated else "truncated"
+                )
+            return True, physics_done, measured
+
         while self.max_decisions is None or decisions < self.max_decisions:
-            if decisions:
-                current_instruction = active_instruction()
-            sampled_images = sample_history(frame_history)
-            if self.monitor is not None:
-                self.monitor.update(
-                    last_frame,
-                    instruction=current_instruction,
-                    vlm_output=monitor_output,
-                    command=monitor_command,
-                    status="waiting for VLM response",
-                    decision=decisions + 1,
-                    chunk_result=monitor_chunk_result,
+            if ready_output is not None:
+                raw_output = ready_output
+                current_instruction = ready_instruction or current_instruction
+                ready_output = None
+                ready_instruction = None
+            else:
+                if decisions:
+                    current_instruction = active_instruction()
+                sampled_images = sample_history(frame_history)
+                if self.monitor is not None:
+                    self.monitor.update(
+                        last_frame,
+                        instruction=current_instruction,
+                        vlm_output=monitor_output,
+                        command=monitor_command,
+                        status="waiting for VLM response",
+                        decision=decisions + 1,
+                        chunk_result=monitor_chunk_result,
+                    )
+
+                def infer():
+                    return self.vlm_client.infer(sampled_images, current_instruction)
+
+                responsive_infer = (
+                    getattr(self.monitor, "run_while_responsive", None)
+                    if self.monitor is not None
+                    else None
+                )
+                raw_output = (
+                    responsive_infer(infer) if callable(responsive_infer) else infer()
                 )
 
-            def infer():
-                return self.vlm_client.infer(sampled_images, current_instruction)
-
-            responsive_infer = (
-                getattr(self.monitor, "run_while_responsive", None)
-                if self.monitor is not None
-                else None
-            )
-            raw_output = (
-                responsive_infer(infer) if callable(responsive_infer) else infer()
-            )
             raw_outputs.append(raw_output)
             decisions += 1
             command = self.action_parser(raw_output)
@@ -386,74 +477,16 @@ class NavigationRunner:
             executed_ticks = 0
             physics_done = False
             for _ in range(command_ticks):
-                if (
-                    self.max_control_steps is not None
-                    and control_steps >= self.max_control_steps
-                ):
-                    termination_reason = "max_control_steps"
-                    physics_done = True
-                    break
-                if self._velocity_facade:
-                    raw_step = self.physics.step()
-                else:
-                    terrain = np.asarray(
-                        self.physics.terrain_features(state), dtype=np.float64
-                    )
-                    action = np.asarray(
-                        self.locomotion_policy.act(state, terrain, command),
-                        dtype=np.float64,
-                    )
-                    if action.ndim != 1 or not np.all(np.isfinite(action)):
-                        raise ValueError(
-                            "locomotion policy action must be a finite one-dimensional array"
-                        )
-                    raw_step = self.physics.step(action)
-                step = (
-                    raw_step
-                    if isinstance(raw_step, PhysicsStep)
-                    else PhysicsStep(raw_step)
+                did_step, physics_done, measured = advance_one_tick(
+                    command,
+                    status="executing motion chunk",
                 )
-                if step.state.step_id <= state.step_id:
-                    raise RuntimeError(
-                        "physics state step_id must increase monotonically"
-                    )
-                state = step.state
-                control_steps += 1
+                if not did_step:
+                    break
                 executed_ticks += 1
-                auto_reset_state = bool(step.info.get("auto_reset_state", False))
-                if not ((step.terminated or step.truncated) and auto_reset_state):
+                if measured:
                     chunk_measured_state = state
-                    metrics.update(state.root_pos_world)
-
-                    capture_due = control_steps % capture_ticks == 0
-                    monitor_due = (
-                        monitor_ticks is not None
-                        and control_steps % monitor_ticks == 0
-                    )
-                    stream_due = control_steps % stream_ticks == 0
-                    if stream_due or capture_due or monitor_due:
-                        self._push_state(state)
-                    if capture_due or monitor_due:
-                        # A split bridge captures the frame produced after the most
-                        # recent pose push. Legacy bridges render synchronously here.
-                        last_frame = self._capture(state, record=capture_due)
-                        if capture_due:
-                            frame_history.append(last_frame)
-                        if self.monitor is not None:
-                            self.monitor.update(
-                                last_frame,
-                                instruction=current_instruction,
-                                vlm_output=monitor_output,
-                                command=monitor_command,
-                                status="executing motion chunk",
-                                decision=decisions,
-                                chunk_result=monitor_chunk_result,
-                            )
-                if step.terminated or step.truncated:
-                    termination_reason = (
-                        "terminated" if step.terminated else "truncated"
-                    )
-                    physics_done = True
+                if physics_done:
                     break
 
             if executed_ticks:
@@ -498,6 +531,57 @@ class NavigationRunner:
                         decision=decisions,
                         chunk_result=monitor_chunk_result,
                     )
+
+            if (
+                not physics_done
+                and self.decouple_vlm
+                and (self.max_decisions is None or decisions < self.max_decisions)
+            ):
+                # The next request is based on the completed action and its
+                # newest captured frame history. While NaVILA is thinking, the
+                # command deadline has expired, so physics continues under a
+                # zero-velocity watchdog instead of extending the old action.
+                next_instruction = active_instruction()
+                current_instruction = next_instruction
+                sampled_images = sample_history(frame_history)
+                if self.monitor is not None:
+                    monitor_command = "zero-velocity watchdog"
+                    self.monitor.update(
+                        last_frame,
+                        instruction=next_instruction,
+                        vlm_output=monitor_output,
+                        command="zero-velocity watchdog",
+                        status="waiting for VLM response; physics continues",
+                        decision=decisions + 1,
+                        chunk_result=monitor_chunk_result,
+                    )
+
+                inference_pool = ThreadPoolExecutor(
+                    max_workers=1,
+                    thread_name_prefix="navila-vlm",
+                )
+                inference_future = inference_pool.submit(
+                    self.vlm_client.infer,
+                    sampled_images,
+                    next_instruction,
+                )
+                zero_command = VelocityCommand(0.0, 0.0, 0.0, 0.0)
+                if self._velocity_facade:
+                    self.physics.set_velocity_command(zero_command)
+                try:
+                    while not inference_future.done():
+                        did_step, physics_done, _ = advance_one_tick(
+                            zero_command,
+                            status="waiting for VLM response; physics continues",
+                        )
+                        if not did_step or physics_done:
+                            break
+                        time.sleep(0.001)
+                    if not physics_done:
+                        ready_output = inference_future.result()
+                        ready_instruction = next_instruction
+                finally:
+                    inference_pool.shutdown(wait=True, cancel_futures=True)
 
             if (
                 not physics_done

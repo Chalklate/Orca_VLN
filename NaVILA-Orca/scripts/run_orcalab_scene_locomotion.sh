@@ -24,16 +24,27 @@ done
 DEFAULT_INSTRUCTION_FILE="${NAVILA_ORCA_INSTRUCTION_FILE:-${PROJECT_ROOT}/prompts/orcalab_scene_locomotion.txt}"
 INSTRUCTION_ARGS=()
 HAS_INSTRUCTION_OVERRIDE=false
+HAS_OUTPUT_OVERRIDE=false
 for ARG in "$@"; do
   case "${ARG}" in
     --instruction|--instruction=*|--instruction-file|--instruction-file=*|--waypoint-instruction-file|--waypoint-instruction-file=*)
       HAS_INSTRUCTION_OVERRIDE=true
-      break
+      ;;
+    --output|--output=*)
+      HAS_OUTPUT_OVERRIDE=true
       ;;
   esac
 done
 if [[ "${HAS_INSTRUCTION_OVERRIDE}" == false ]]; then
   INSTRUCTION_ARGS=(--instruction-file "${DEFAULT_INSTRUCTION_FILE}")
+fi
+OUTPUT_ARGS=()
+if [[ "${HAS_OUTPUT_OVERRIDE}" == false ]]; then
+  RUN_ID="$(date -u +%Y%m%dT%H%M%S)-$$"
+  OUTPUT_ARGS=(
+    --output
+    "${NAVILA_ORCA_OUTPUT:-${PROJECT_ROOT}/outputs/scene_locomotion_runs/${RUN_ID}}"
+  )
 fi
 
 # This command never launches or republishes OrcaLab. It reuses the current
@@ -60,9 +71,10 @@ exec "${ORCA_PYTHON}" -m navila_orca.cli run \
   --state-stream-interval 0.04 \
   --live-monitor \
   --monitor-interval 0.1 \
+  --decouple-vlm \
   --warmup-steps 100 \
   --max-decisions 0 \
   --max-control-steps 0 \
-  --output "${PROJECT_ROOT}/outputs/scene_locomotion_smoke" \
+  "${OUTPUT_ARGS[@]}" \
   "${INSTRUCTION_ARGS[@]}" \
   "$@"

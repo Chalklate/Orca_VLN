@@ -1,0 +1,77 @@
+[
+  {
+    "domain": "NaVILA Runner",
+    "module": "navila_orca.runner",
+    "functions": [
+      "NavigationRunner.run",
+      "NavigationRunner._push_state",
+      "NavigationRunner._capture"
+    ]
+  },
+  {
+    "domain": "Render Recording",
+    "module": "navila_orca.cli",
+    "functions": [
+      "RecordingRenderBridge.push_state",
+      "RecordingRenderBridge.capture",
+      "RecordingRenderBridge.capture_transient"
+    ]
+  },
+  {
+    "domain": "Orca Render Bridge",
+    "module": "navila_orca.render.orca",
+    "functions": [
+      "OrcaLabRenderBridge.push_state",
+      "OrcaLabRenderBridge.capture",
+      "OrcaLabRenderBridge.render"
+    ]
+  },
+  {
+    "domain": "Orca PNG Camera",
+    "module": "navila_orca.render.orca_camera",
+    "functions": [
+      "OrcaGrpcPngCamera._run",
+      "OrcaGrpcPngCamera.get_frame",
+      "OrcaMujocoPngCamera.get_frame"
+    ]
+  },
+  {
+    "domain": "Orca Edit RPC",
+    "module": "orcalab.protos.edit_service_wrapper",
+    "functions": [
+      "EditServiceWrapper.get_camera_png",
+      "EditServiceWrapper.get_camera_data_png"
+    ]
+  },
+  {
+    "domain": "Orca Remote Scene",
+    "module": "orcalab.remote_scene",
+    "functions": [
+      "RemoteScene.get_camera_png",
+      "RemoteScene.get_camera_data_png"
+    ]
+  },
+  {
+    "domain": "Orca Viewport Python",
+    "module": "orcalab.ui.viewport",
+    "functions": [
+      "Viewport._viewport_main_loop"
+    ]
+  },
+  {
+    "domain": "Orca Viewport Binding",
+    "module": "orcalab_pyside.viewport",
+    "functions": [
+      "Viewport.main_loop_tick"
+    ]
+  },
+  {
+    "domain": "Pillow Decode",
+    "module": "PIL.Image",
+    "functions": [
+      "open",
+      "Image.load",
+      "Image.convert"
+    ]
+  }
+]

@@ -8,10 +8,12 @@ from types import SimpleNamespace
 import numpy as np
 from PIL import Image
 
+import navila_orca.render.orca_camera as orca_camera_module
 from navila_orca.render.orca_camera import (
     OrcaEgoCameraFollower,
     OrcaGrpcPngCamera,
     _OrcaRuntime,
+    _read_complete_png,
     compose_camera_pose,
 )
 
@@ -31,6 +33,36 @@ def test_compose_camera_pose_rotates_mount_with_go2_base() -> None:
     position, quat = compose_camera_pose([0.0, 0.0, 0.4], root_quat)
     np.testing.assert_allclose(position, [0.0, 0.1, 0.9], atol=1.0e-12)
     assert np.isclose(np.linalg.norm(quat), 1.0)
+
+
+def test_complete_png_is_decoded_only_after_iend_arrives(
+    tmp_path, monkeypatch
+) -> None:
+    complete_path = tmp_path / "complete.png"
+    pending_path = tmp_path / "pending.png"
+    Image.new("RGB", (4, 3), (10, 20, 30)).save(complete_path)
+    complete_png = complete_path.read_bytes()
+    pending_path.write_bytes(complete_png[:-12])
+
+    image_open_calls = 0
+    real_image_open = Image.open
+
+    def counted_image_open(*args, **kwargs):
+        nonlocal image_open_calls
+        image_open_calls += 1
+        return real_image_open(*args, **kwargs)
+
+    def finish_write(_seconds):
+        pending_path.write_bytes(complete_png)
+
+    monkeypatch.setattr(orca_camera_module.Image, "open", counted_image_open)
+    monkeypatch.setattr(orca_camera_module.time, "sleep", finish_write)
+
+    rgb = _read_complete_png(str(pending_path), timeout_s=1.0)
+
+    assert image_open_calls == 1
+    assert rgb.shape == (3, 4, 3)
+    assert np.all(rgb == [10, 20, 30])
 
 
 def test_compose_camera_pose_can_reject_base_roll_from_camera_orientation() -> None:

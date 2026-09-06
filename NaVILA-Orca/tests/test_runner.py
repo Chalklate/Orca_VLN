@@ -1,3 +1,5 @@
+import threading
+
 import numpy as np
 import pytest
 
@@ -353,6 +355,51 @@ def test_zero_limits_run_until_vlm_stop():
     assert result.termination_reason == "stop"
     assert result.control_steps == 25
     assert result.decisions == 2
+
+
+def test_decoupled_vlm_runs_zero_velocity_watchdog_while_waiting():
+    class CountingPhysics(FakePhysics):
+        def __init__(self):
+            super().__init__()
+            self.zero_steps = 0
+            self.release = threading.Event()
+
+        def step(self):
+            if self.command is not None and (
+                self.command.vx == 0.0
+                and self.command.vy == 0.0
+                and self.command.wz == 0.0
+            ):
+                self.zero_steps += 1
+            state = super().step()
+            if self.zero_steps >= 5:
+                self.release.set()
+            return state
+
+    physics = CountingPhysics()
+
+    class GatedVLM(ScriptedVLM):
+        def infer(self, images, instruction):
+            output = super().infer(images, instruction)
+            if len(self.requests) == 2:
+                assert physics.release.wait(timeout=1.0)
+            return output
+
+    vlm = GatedVLM(["move forward 25 cm", "stop"])
+    result = NavigationRunner(
+        physics,
+        FakeRenderer(),
+        vlm,
+        scene_fidelity=False,
+        decouple_vlm=True,
+        max_control_steps=200,
+    ).run(_episode())
+
+    assert result.termination_reason == "stop"
+    assert result.control_steps >= 30
+    assert physics.zero_steps >= 5
+    assert result.metrics["path_length"] == pytest.approx(0.25)
+    assert len(vlm.requests) == 2
 
 
 def test_live_monitor_refreshes_faster_without_changing_vlm_history_interval():

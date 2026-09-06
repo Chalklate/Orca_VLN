@@ -35,10 +35,43 @@ DEFAULT_CAMERA_MOUNT_POSITION = (0.1, 0.0, 0.5)
 # the equivalent forward +X / image-up +Z entity rotation is yaw -90 degrees.
 _SQRT_HALF = float(2.0**-0.5)
 DEFAULT_CAMERA_MOUNT_QUAT_WXYZ = (_SQRT_HALF, 0.0, 0.0, -_SQRT_HALF)
+_PNG_IEND_TRAILER = b"\x00\x00\x00\x00IEND\xaeB`\x82"
 
 
 class OrcaCameraError(RuntimeError):
     """Raised when the OrcaLab ego-camera cannot be created or configured."""
+
+
+def _read_complete_png(
+    path: str, *, timeout_s: float, poll_interval_s: float = 0.01
+) -> np.ndarray:
+    """Wait for OrcaLab's asynchronous file write, then decode the PNG once."""
+
+    deadline = time.monotonic() + timeout_s
+    last_error: OSError | EOFError | None = None
+    while True:
+        try:
+            with open(path, "rb") as stream:
+                stream.seek(-len(_PNG_IEND_TRAILER), os.SEEK_END)
+                if stream.read(len(_PNG_IEND_TRAILER)) != _PNG_IEND_TRAILER:
+                    raise EOFError("PNG IEND chunk is not available yet")
+            break
+        except (OSError, EOFError) as exc:
+            last_error = exc
+            if time.monotonic() >= deadline:
+                raise OrcaCameraError(
+                    f"OrcaLab PNG was not completed within {timeout_s:.1f}s: "
+                    f"{path}: {last_error}"
+                ) from exc
+            time.sleep(poll_interval_s)
+
+    try:
+        with Image.open(path) as image:
+            return np.asarray(image.convert("RGB"), dtype=np.uint8).copy()
+    except (OSError, SyntaxError, ValueError) as exc:
+        raise OrcaCameraError(
+            f"OrcaLab completed an unreadable PNG: {path}: {exc}"
+        ) from exc
 
 
 def _finite_vector(value: Sequence[float], size: int, name: str) -> np.ndarray:
@@ -576,21 +609,7 @@ class OrcaGrpcPngCamera:
             f"{self.output_dir}/color/"
             f"{self.remote_camera_name}_color_{request_index}.png"
         )
-        deadline = time.monotonic() + self.timeout_s
-        last_error: Exception | None = None
-        while True:
-            try:
-                with Image.open(image_path) as image:
-                    array = np.asarray(image.convert("RGB"), dtype=np.uint8).copy()
-                break
-            except (OSError, SyntaxError, ValueError) as exc:
-                last_error = exc
-                if time.monotonic() >= deadline:
-                    raise OrcaCameraError(
-                        f"OrcaLab reported a color capture but {image_path} was "
-                        f"not readable within {self.timeout_s:.1f}s: {last_error}"
-                    ) from exc
-                time.sleep(0.01)
+        array = _read_complete_png(image_path, timeout_s=self.timeout_s)
 
         if format == "bgr24":
             array = np.ascontiguousarray(array[..., ::-1])
@@ -628,18 +647,7 @@ class OrcaMujocoPngCamera(OrcaGrpcPngCamera):
         path = os.path.join(self.output_dir, filename)
         if not self._run(self._service.get_camera_png(self.remote_camera_name, self.output_dir, filename)):
             raise OrcaCameraError(f"Orca camera {self.remote_camera_name!r} refused PNG capture")
-        deadline = time.monotonic() + self.timeout_s
-        last_error: Exception | None = None
-        while True:
-            try:
-                with Image.open(path) as image:
-                    array = np.asarray(image.convert("RGB"), dtype=np.uint8).copy()
-                break
-            except (OSError, SyntaxError, ValueError) as exc:
-                last_error = exc
-                if time.monotonic() >= deadline:
-                    raise OrcaCameraError(f"Orca camera PNG was not readable: {path}: {last_error}") from exc
-                time.sleep(0.01)
+        array = _read_complete_png(path, timeout_s=self.timeout_s)
         if format == "bgr24":
             array = np.ascontiguousarray(array[..., ::-1])
         self._frame_index += 1

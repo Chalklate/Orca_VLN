@@ -349,6 +349,7 @@ def _run(args: argparse.Namespace) -> int:
             max_decisions=args.max_decisions,
             monitor=live_monitor,
             monitor_interval_s=args.monitor_interval,
+            decouple_vlm=args.decouple_vlm,
             waypoint_instructions=waypoint_instructions,
             instruction_provider=instruction_provider,
         )
@@ -770,6 +771,15 @@ def _build_parser() -> argparse.ArgumentParser:
         type=float,
         default=0.1,
         help="simulated seconds between live ego monitor refreshes",
+    )
+    run.add_argument(
+        "--decouple-vlm",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "run physics under a zero-velocity watchdog while the next NaVILA "
+            "inference is pending"
+        ),
     )
     run.add_argument(
         "--max-control-steps",

@@ -372,9 +372,19 @@ def test_scene_launcher_uses_editable_prompt_file_unless_overridden(
     assert default_args[instruction_index + 1] == str(
         PROJECT_ROOT / "prompts/orcalab_scene_locomotion.txt"
     )
+    output_index = default_args.index("--output")
+    assert default_args[output_index + 1].startswith(
+        str(PROJECT_ROOT / "outputs/scene_locomotion_runs/")
+    )
 
     override_run = subprocess.run(
-        [launcher, "--instruction", "Turn left."],
+        [
+            launcher,
+            "--instruction",
+            "Turn left.",
+            "--output",
+            str(tmp_path / "custom-output"),
+        ],
         check=True,
         capture_output=True,
         text=True,
@@ -382,7 +392,29 @@ def test_scene_launcher_uses_editable_prompt_file_unless_overridden(
     )
     override_args = override_run.stdout.splitlines()
     assert "--instruction-file" not in override_args
-    assert override_args[-2:] == ["--instruction", "Turn left."]
+    assert override_args.count("--output") == 1
+    assert override_args[-4:] == [
+        "--instruction",
+        "Turn left.",
+        "--output",
+        str(tmp_path / "custom-output"),
+    ]
+
+
+def test_memory_guide_supervisor_has_expected_commands() -> None:
+    supervisor = SCRIPTS / "memory_guide_dev.sh"
+    result = subprocess.run(
+        ["bash", str(supervisor), "--help"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    for command in ("start", "status", "run", "inspect", "stop"):
+        assert f" {command}" in result.stdout
+    assert "NAVILA_SERVER_MODE" in result.stdout
+    assert "NAVILA_AWS_INSTANCE_ID" in result.stdout
+    assert "SimpleMovement_DiningTable" not in result.stdout
 
 
 def test_orcalab_setup_prepares_native_viewport_before_first_gui() -> None:

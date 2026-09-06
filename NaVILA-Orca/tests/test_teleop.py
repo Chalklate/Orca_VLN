@@ -51,11 +51,13 @@ class FakePhysics:
 class FakeRenderer:
     def __init__(self):
         self.pushed = []
+        self.captures = 0
 
     def push_state(self, state, qpos_batch=None):
         self.pushed.append((state.step_id, qpos_batch.shape))
 
     def capture(self, state, qpos_batch=None):
+        self.captures += 1
         return RenderFrame(
             state.step_id,
             state.sim_time_s,
@@ -98,9 +100,10 @@ def _episode():
 
 def test_keyboard_teleop_records_pose_and_png_anchor(tmp_path):
     physics = FakePhysics()
+    renderer = FakeRenderer()
     result = KeyboardTeleopRunner(
         physics,
-        FakeRenderer(),
+        renderer,
         output_dir=tmp_path,
         capture_interval_s=0.02,
         realtime=False,
@@ -114,6 +117,8 @@ def test_keyboard_teleop_records_pose_and_png_anchor(tmp_path):
     assert len(result.anchors) == 1
     assert result.anchors[0].label == "dining_table"
     assert result.anchors[0].step_id == 1
+    assert renderer.captures == 1
+    assert [step for step, _shape in renderer.pushed] == [0, 1, 2]
     assert (tmp_path / "anchors/000_dining_table.png").is_file()
     payload = json.loads((tmp_path / "teleop.json").read_text())
     assert payload["anchors"][0]["root_pos_world"] == [0.01, 0.0, 0.0]

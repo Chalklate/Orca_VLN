@@ -534,6 +534,7 @@ def _teleop(args: argparse.Namespace) -> int:
             turn_rate_rad_s=args.turn_rate,
             command_hold_s=args.command_hold,
             capture_interval_s=args.capture_interval,
+            state_stream_interval_s=args.state_stream_interval,
             live_monitor=live_monitor,
             realtime=not args.no_realtime,
         )
@@ -949,7 +950,13 @@ def _build_parser() -> argparse.ArgumentParser:
         "--capture-interval",
         type=float,
         default=0.2,
-        help="simulated seconds between camera captures",
+        help="simulated seconds between optional live-monitor camera captures; M always captures",
+    )
+    teleop.add_argument(
+        "--state-stream-interval",
+        type=float,
+        default=0.04,
+        help="simulated seconds between pose pushes to OrcaLab; camera-free",
     )
     teleop.add_argument(
         "--live-monitor",

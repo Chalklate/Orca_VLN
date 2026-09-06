@@ -150,6 +150,7 @@ class KeyboardTeleopRunner:
         turn_rate_rad_s: float = 0.8,
         command_hold_s: float = 0.35,
         capture_interval_s: float = 0.2,
+        state_stream_interval_s: float = 0.04,
         live_monitor: Any | None = None,
         realtime: bool = True,
     ) -> None:
@@ -162,6 +163,9 @@ class KeyboardTeleopRunner:
         self.command_hold_s = self._positive(command_hold_s, "command_hold_s")
         self.capture_interval_s = self._positive(
             capture_interval_s, "capture_interval_s"
+        )
+        self.state_stream_interval_s = self._positive(
+            state_stream_interval_s, "state_stream_interval_s"
         )
         self.live_monitor = live_monitor
         self.realtime = bool(realtime)
@@ -197,8 +201,13 @@ class KeyboardTeleopRunner:
 
         control_dt = float(self.physics.control_dt)
         capture_ticks = duration_to_ticks(self.capture_interval_s, control_dt)
+        stream_ticks = duration_to_ticks(self.state_stream_interval_s, control_dt)
         if capture_ticks <= 0:
             raise ValueError("capture_interval_s must span at least one control tick")
+        if stream_ticks <= 0:
+            raise ValueError(
+                "state_stream_interval_s must span at least one control tick"
+            )
 
         if self.output_dir is not None:
             self.output_dir.mkdir(parents=True, exist_ok=True)
@@ -213,14 +222,25 @@ class KeyboardTeleopRunner:
         command_deadline = 0.0
         speed_scale = 1.0
         next_tick = time.monotonic()
+        last_pushed_step: int | None = None
+
+        def push_state() -> None:
+            """Mirror qpos without requesting or decoding a camera frame."""
+
+            nonlocal last_pushed_step
+            if self.renderer is None or last_pushed_step == state.step_id:
+                return
+            qpos_batch = getattr(self.physics, "qpos_batch", None)
+            push = getattr(self.renderer, "push_state", None)
+            if callable(push):
+                push(state, qpos_batch=qpos_batch)
+                last_pushed_step = int(state.step_id)
 
         def capture(*, record: bool = True):
             if self.renderer is None:
                 return None
+            push_state()
             qpos_batch = getattr(self.physics, "qpos_batch", None)
-            push_state = getattr(self.renderer, "push_state", None)
-            if callable(push_state):
-                push_state(state, qpos_batch=qpos_batch)
             capture_method = getattr(self.renderer, "capture", None)
             if callable(capture_method):
                 frame = capture_method(state, qpos_batch=qpos_batch)
@@ -247,7 +267,9 @@ class KeyboardTeleopRunner:
                 )
             return frame
 
-        capture()
+        push_state()
+        if self.live_monitor is not None:
+            capture()
         print(self.controls_text(), flush=True)
         print("Press M to label the current view and save its pose.", flush=True)
 
@@ -322,7 +344,12 @@ class KeyboardTeleopRunner:
                 state = step.state
                 control_steps += 1
 
-                if control_steps % capture_ticks == 0:
+                if control_steps % stream_ticks == 0:
+                    push_state()
+                if (
+                    self.live_monitor is not None
+                    and control_steps % capture_ticks == 0
+                ):
                     capture()
                 if step.terminated or step.truncated:
                     termination_reason = "terminated" if step.terminated else "truncated"
@@ -461,6 +488,7 @@ class KeyboardTeleopRunner:
                 "turn_rate_rad_s": self.turn_rate_rad_s,
                 "command_hold_s": self.command_hold_s,
                 "capture_interval_s": self.capture_interval_s,
+                "state_stream_interval_s": self.state_stream_interval_s,
             },
             "command_events": list(command_events),
         }

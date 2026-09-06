@@ -125,7 +125,7 @@ Generated files:
 
 The Memory Guide launcher defaults to:
 
-- Camera mount position `(0.1, 0, 0.9)`
+- Camera mount position `(0.1, 0, 1.2)`
 - Stabilized camera horizon
 
 Runner arguments supplied after the query override those defaults.

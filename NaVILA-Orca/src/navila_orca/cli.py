@@ -36,6 +36,7 @@ from .render.orca_camera import (
     OrcaMujocoPngCamera,
 )
 from .runner import NavigationRunner
+from .teleop import KeyboardTeleopRunner, TerminalKeyboard
 from .training import (
     COMPATIBLE_VERSION_SPECS,
     compatibility_errors,
@@ -492,6 +493,97 @@ def _run(args: argparse.Namespace) -> int:
         backend.close()
 
 
+def _teleop(args: argparse.Namespace) -> int:
+    """Run simulator physics from a terminal keyboard, without NaVILA."""
+
+    episode = load_episode(args.scenario)
+    output_dir = _resolve_output_dir(args.output)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    backend = MjlabGo2Backend(
+        checkpoint=args.checkpoint,
+        device=args.device,
+        num_envs=1,
+        deterministic_play=not args.randomized_play,
+        warmup_steps=args.warmup_steps,
+    )
+    raw_renderer: Any | None = None
+    renderer: RecordingRenderBridge | None = None
+    live_monitor: LiveNavigationMonitor | None = None
+    loopback_server: ProgrammableRenderServer | None = None
+    try:
+        backend.start()
+        if not args.no_preview:
+            raw_renderer, loopback_server = _make_renderer(
+                args,
+                backend,
+                output_dir=output_dir,
+            )
+            renderer = RecordingRenderBridge(raw_renderer)
+        if args.live_monitor:
+            if renderer is None:
+                raise ValueError("--live-monitor requires preview rendering")
+            live_monitor = LiveNavigationMonitor(window_name="keyboard teleop")
+
+        teleop = KeyboardTeleopRunner(
+            backend,
+            renderer,
+            output_dir=output_dir,
+            forward_speed_mps=args.forward_speed,
+            strafe_speed_mps=args.strafe_speed,
+            turn_rate_rad_s=args.turn_rate,
+            command_hold_s=args.command_hold,
+            capture_interval_s=args.capture_interval,
+            live_monitor=live_monitor,
+            realtime=not args.no_realtime,
+        )
+        with TerminalKeyboard() as keyboard:
+            result = teleop.run(
+                episode,
+                keyboard,
+                max_control_steps=args.max_control_steps,
+                max_sim_time_s=args.max_sim_time,
+            )
+        payload = {
+            "pipeline_status": "completed",
+            "termination_reason": result.termination_reason,
+            "control_steps": result.control_steps,
+            "sim_time_s": result.sim_time_s,
+            "anchors": [asdict(anchor) for anchor in result.anchors],
+            "output_directory": str(output_dir),
+            "runtime": {
+                "physics": "mjlab Unitree-Go2-Flat / MuJoCo Warp",
+                "checkpoint": str(Path(args.checkpoint).expanduser().resolve()),
+                "scenario": str(Path(args.scenario).expanduser().resolve()),
+                "device": args.device,
+                "control_dt": backend.control_dt,
+                "warmup_steps": args.warmup_steps,
+                "render_backend": None if args.no_preview else args.render_backend,
+                "live_monitor": bool(args.live_monitor),
+                "preview": not args.no_preview,
+            },
+        }
+        print(json.dumps(payload, indent=2, ensure_ascii=False))
+        print(f"teleop artifacts: {output_dir}")
+        return 0
+    finally:
+        if live_monitor is not None:
+            live_monitor.close()
+        if renderer is not None:
+            try:
+                renderer.close()
+            except Exception as exc:
+                print(f"warning: renderer close failed: {exc}", file=sys.stderr)
+        elif raw_renderer is not None:
+            try:
+                raw_renderer.close()
+            except Exception:
+                pass
+        if loopback_server is not None:
+            loopback_server.stop()
+        backend.close()
+
+
 def _resolve_output_dir(value: str | None) -> Path:
     if value:
         return Path(value).expanduser().resolve()
@@ -592,6 +684,108 @@ def _state_dict(state: RobotState) -> dict[str, Any]:
     }
 
 
+def _add_renderer_options(parser: argparse.ArgumentParser) -> None:
+    """Add the renderer flags shared by ``run`` and ``teleop``."""
+
+    parser.add_argument(
+        "--render-backend",
+        choices=("grpc-loopback", "grpc", "orcalab"),
+        default="grpc-loopback",
+    )
+    parser.add_argument("--grpc-render-address")
+    parser.add_argument("--orcagym-address", default="127.0.0.1:50051")
+    parser.add_argument("--orcalab-edit-address", default="127.0.0.1:50151")
+    parser.add_argument(
+        "--orcalab-camera-mode",
+        choices=("agent-data-png", "mujoco-png"),
+        default="mujoco-png",
+    )
+    parser.add_argument("--camera-port", type=int, default=7070)
+    parser.add_argument("--camera-name", default="navila_ego")
+    parser.add_argument(
+        "--camera-transport",
+        choices=("grpc-png", "websocket"),
+        default="grpc-png",
+        help="RGB capture transport; grpc-png works with the current local OrcaStudio build",
+    )
+    parser.add_argument("--camera-actor-name", default=DEFAULT_CAMERA_ACTOR_NAME)
+    parser.add_argument("--camera-asset-path", default=DEFAULT_CAMERA_ASSET)
+    parser.add_argument(
+        "--camera-mount-position",
+        type=float,
+        nargs=3,
+        metavar=("X", "Y", "Z"),
+        default=list(DEFAULT_CAMERA_MOUNT_POSITION),
+        help="Go2 base-frame camera translation (original NaVILA default: 0.1 0 0.5)",
+    )
+    parser.add_argument(
+        "--camera-mount-quat-wxyz",
+        type=float,
+        nargs=4,
+        metavar=("W", "X", "Y", "Z"),
+        default=list(DEFAULT_CAMERA_MOUNT_QUAT_WXYZ),
+        help="Go2 base-frame camera rotation in wxyz order",
+    )
+    parser.add_argument(
+        "--stabilize-camera-horizon",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="follow Go2 yaw while rejecting base roll/pitch in ego-camera orientation",
+    )
+    parser.add_argument(
+        "--no-camera-bind",
+        action="store_true",
+        help="use a manually configured camera stream instead of provisioning/following one",
+    )
+    parser.add_argument("--robot-asset-path", default=DEFAULT_GO2_ASSET)
+    parser.add_argument(
+        "--robot-actor-name",
+        default="auto",
+        help="existing OrcaLab Go2 actor name; 'auto' requires exactly one complete Go2",
+    )
+    parser.add_argument("--terrain-asset-path")
+    publish_group = parser.add_mutually_exclusive_group()
+    publish_group.add_argument(
+        "--publish-scene",
+        action="store_true",
+        help="destructively republish the Orca scene; disabled by default to preserve authored objects",
+    )
+    publish_group.add_argument(
+        "--no-publish",
+        action="store_true",
+        help="legacy explicit spelling for the safe default: reuse the current scene",
+    )
+    parser.add_argument(
+        "--anchor-existing-scene",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="apply local locomotion relative to the authored Go2 scene XY/yaw",
+    )
+    parser.add_argument(
+        "--scene-profile",
+        choices=("orca-train", "orca-runtime"),
+        default="orca-train",
+        help="MuJoCo option profile used for both downloaded XML and remote scene",
+    )
+    parser.add_argument(
+        "--scene-timestep",
+        type=float,
+        help="override the selected profile timestep; normally leave unset",
+    )
+    parser.add_argument(
+        "--strict-scene-alignment",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="fail before motion when OrcaLab rejects a MuJoCo scene option",
+    )
+    parser.add_argument(
+        "--manual-xml-override",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="write and load a corrected copy of OrcaLab's downloaded combined XML",
+    )
+
+
 def _build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="navila-orca",
@@ -634,99 +828,7 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     run.add_argument("--device", default="cuda:0")
     run.add_argument("--checkpoint", default=str(DEFAULT_CHECKPOINT))
-    run.add_argument(
-        "--render-backend",
-        choices=("grpc-loopback", "grpc", "orcalab"),
-        default="grpc-loopback",
-    )
-    run.add_argument("--grpc-render-address")
-    run.add_argument("--orcagym-address", default="127.0.0.1:50051")
-    run.add_argument("--orcalab-edit-address", default="127.0.0.1:50151")
-    run.add_argument("--orcalab-camera-mode", choices=("agent-data-png", "mujoco-png"), default="mujoco-png")
-    run.add_argument("--camera-port", type=int, default=7070)
-    run.add_argument("--camera-name", default="navila_ego")
-    run.add_argument(
-        "--camera-transport",
-        choices=("grpc-png", "websocket"),
-        default="grpc-png",
-        help="RGB capture transport; grpc-png works with the current local OrcaStudio build",
-    )
-    run.add_argument("--camera-actor-name", default=DEFAULT_CAMERA_ACTOR_NAME)
-    run.add_argument("--camera-asset-path", default=DEFAULT_CAMERA_ASSET)
-    run.add_argument(
-        "--camera-mount-position",
-        type=float,
-        nargs=3,
-        metavar=("X", "Y", "Z"),
-        default=list(DEFAULT_CAMERA_MOUNT_POSITION),
-        help="Go2 base-frame camera translation (original NaVILA default: 0.1 0 0.5)",
-    )
-    run.add_argument(
-        "--camera-mount-quat-wxyz",
-        type=float,
-        nargs=4,
-        metavar=("W", "X", "Y", "Z"),
-        default=list(DEFAULT_CAMERA_MOUNT_QUAT_WXYZ),
-        help="Go2 base-frame camera rotation in wxyz order",
-    )
-    run.add_argument(
-        "--stabilize-camera-horizon",
-        action=argparse.BooleanOptionalAction,
-        default=False,
-        help="follow Go2 yaw while rejecting base roll/pitch in ego-camera orientation",
-    )
-    run.add_argument(
-        "--no-camera-bind",
-        action="store_true",
-        help="use a manually configured camera stream instead of provisioning/following one",
-    )
-    run.add_argument("--robot-asset-path", default=DEFAULT_GO2_ASSET)
-    run.add_argument(
-        "--robot-actor-name",
-        default="auto",
-        help="existing OrcaLab Go2 actor name; 'auto' requires exactly one complete Go2",
-    )
-    run.add_argument("--terrain-asset-path")
-    publish_group = run.add_mutually_exclusive_group()
-    publish_group.add_argument(
-        "--publish-scene",
-        action="store_true",
-        help="destructively republish the Orca scene; disabled by default to preserve authored objects",
-    )
-    publish_group.add_argument(
-        "--no-publish",
-        action="store_true",
-        help="legacy explicit spelling for the safe default: reuse the current scene",
-    )
-    run.add_argument(
-        "--anchor-existing-scene",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="apply local locomotion relative to the authored Go2 scene XY/yaw",
-    )
-    run.add_argument(
-        "--scene-profile",
-        choices=("orca-train", "orca-runtime"),
-        default="orca-train",
-        help="MuJoCo option profile used for both downloaded XML and remote scene",
-    )
-    run.add_argument(
-        "--scene-timestep",
-        type=float,
-        help="override the selected profile timestep; normally leave unset",
-    )
-    run.add_argument(
-        "--strict-scene-alignment",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="fail before motion when OrcaLab rejects a MuJoCo scene option",
-    )
-    run.add_argument(
-        "--manual-xml-override",
-        action=argparse.BooleanOptionalAction,
-        default=True,
-        help="write and load a corrected copy of OrcaLab's downloaded combined XML",
-    )
+    _add_renderer_options(run)
     run.add_argument(
         "--randomized-play",
         action="store_true",
@@ -795,6 +897,90 @@ def _build_parser() -> argparse.ArgumentParser:
     )
     run.add_argument("--output")
     run.set_defaults(func=_run)
+
+    teleop = subparsers.add_parser(
+        "teleop",
+        help="drive simulator locomotion from keyboard and record pose-tagged anchors",
+    )
+    teleop.add_argument(
+        "--scenario",
+        default=str(DEFAULT_SCENARIO),
+        help="project-owned navigation scenario JSON used for the initial reset contract",
+    )
+    teleop.add_argument("--device", default="cuda:0")
+    teleop.add_argument("--checkpoint", default=str(DEFAULT_CHECKPOINT))
+    _add_renderer_options(teleop)
+    teleop.add_argument(
+        "--randomized-play",
+        action="store_true",
+        help="retain MJLab reset/domain randomization instead of the deterministic scene test profile",
+    )
+    teleop.add_argument(
+        "--warmup-steps",
+        type=int,
+        default=100,
+        help="zero-command Go2 policy steps after reset",
+    )
+    teleop.add_argument(
+        "--forward-speed",
+        type=float,
+        default=0.5,
+        help="forward/backward keyboard speed in m/s",
+    )
+    teleop.add_argument(
+        "--strafe-speed",
+        type=float,
+        default=0.35,
+        help="Q/E keyboard strafe speed in m/s",
+    )
+    teleop.add_argument(
+        "--turn-rate",
+        type=float,
+        default=0.8,
+        help="A/D keyboard yaw rate in rad/s",
+    )
+    teleop.add_argument(
+        "--command-hold",
+        type=float,
+        default=0.35,
+        help="seconds a movement key remains active without terminal key-repeat",
+    )
+    teleop.add_argument(
+        "--capture-interval",
+        type=float,
+        default=0.2,
+        help="simulated seconds between camera captures",
+    )
+    teleop.add_argument(
+        "--live-monitor",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="show the captured ego RGB beside teleoperation diagnostics",
+    )
+    teleop.add_argument(
+        "--no-preview",
+        action="store_true",
+        help="run physics and pose logging without connecting to an Orca/camera renderer",
+    )
+    teleop.add_argument(
+        "--no-realtime",
+        action="store_true",
+        help="run as fast as possible instead of pacing physics to wall-clock time",
+    )
+    teleop.add_argument(
+        "--max-control-steps",
+        type=int,
+        default=0,
+        help="control-step limit; use 0 for unlimited",
+    )
+    teleop.add_argument(
+        "--max-sim-time",
+        type=float,
+        default=0.0,
+        help="simulated-time limit in seconds; use 0 for unlimited",
+    )
+    teleop.add_argument("--output")
+    teleop.set_defaults(func=_teleop)
     return parser
 
 

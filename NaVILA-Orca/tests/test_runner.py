@@ -182,7 +182,7 @@ def test_runner_refreshes_file_backed_instruction_between_decisions():
     ]
 
 
-def test_runner_treats_intermediate_waypoint_stops_as_stage_completion():
+def test_runner_treats_intermediate_waypoint_stops_as_stage_completion(capsys):
     physics = FakePhysics()
     vlm = ScriptedVLM(
         [
@@ -220,6 +220,10 @@ def test_runner_treats_intermediate_waypoint_stops_as_stage_completion():
         "Waypoint 3 of 3. Reach the yellow truck, then stop.",
         "Waypoint 3 of 3. Reach the yellow truck, then stop.",
     ]
+    output = capsys.readouterr().out
+    assert "WAYPOINT_STOP_ACCEPTED waypoint=1/3 decision=2" in output
+    assert "WAYPOINT_STOP_ACCEPTED waypoint=2/3 decision=4" in output
+    assert "MISSION_STOP_ACCEPTED decision=6 waypoint=3/3" in output
     # Two intermediate zero commands plus three forward commands.
     assert physics.command_updates == 5
 

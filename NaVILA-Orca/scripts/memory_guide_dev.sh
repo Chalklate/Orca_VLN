@@ -9,6 +9,7 @@ STATE_DIR="${NAVILA_DEV_STATE_DIR:-${PROJECT_ROOT}/outputs/dev_stack}"
 RUN_ROOT="${NAVILA_DEV_RUN_ROOT:-${PROJECT_ROOT}/outputs/memory_guide}"
 RUNS_DIR="${RUN_ROOT}/runs"
 LATEST_LINK="${RUN_ROOT}/latest-run"
+TELEOP_LATEST_LINK="${RUN_ROOT}/latest-teleop"
 ORCALAB_SCENE="${NAVILA_ORCALAB_SCENE:-SimpleMovement_DiningTable}"
 ORCALAB_LAYOUT="${NAVILA_ORCALAB_LAYOUT:-${PROJECT_ROOT}/../dethread/kitchen2.json}"
 ORCALAB_VK_ICD="${NAVILA_ORCALAB_VK_ICD:-/usr/share/vulkan/icd.d/nvidia_icd.json}"
@@ -28,6 +29,7 @@ Usage:
   $0 start
   $0 status
   $0 run --query "Where are my glasses?" [runner options]
+  $0 teleop [teleop options]
   $0 inspect [RUN_DIRECTORY]
   $0 stop
 
@@ -398,6 +400,28 @@ run_mission() {
   inspect_run "${run_dir}"
 }
 
+run_teleop() {
+  local args=("$@")
+  for port in "${ORCALAB_MCP_PORT}" "${ORCALAB_EDIT_PORT}" "${ORCAGYM_PORT}"; do
+    if ! port_open "${port}"; then
+      echo "Required service on 127.0.0.1:${port} is unavailable; start the stack first." >&2
+      return 1
+    fi
+  done
+
+  local run_id run_dir
+  run_id="$(date -u +%Y%m%dT%H%M%S)-$$"
+  run_dir="${RUNS_DIR}/teleop-${run_id}"
+  mkdir -p "${run_dir}"
+  ln -sfn "runs/teleop-${run_id}" "${TELEOP_LATEST_LINK}"
+
+  NAVILA_ORCA_TELEOP_OUTPUT="${run_dir}" \
+    "${SCRIPT_DIR}/run_orcalab_teleop.sh" \
+    "${args[@]}" \
+    > >(tee "${run_dir}/teleop.log") 2>&1
+  echo "Teleop artifacts: ${run_dir}"
+}
+
 inspect_run() {
   local run_dir="${1:-${LATEST_LINK}}"
   run_dir="$(readlink -f "${run_dir}")"
@@ -467,6 +491,10 @@ case "${1:-}" in
   run)
     shift
     run_mission "$@"
+    ;;
+  teleop)
+    shift
+    run_teleop "$@"
     ;;
   inspect)
     shift

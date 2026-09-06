@@ -408,6 +408,12 @@ class NavigationRunner:
                         )
                     continue
                 if waypoint_count and waypoint_index + 1 < waypoint_count:
+                    print(
+                        "WAYPOINT_STOP_ACCEPTED "
+                        f"waypoint={waypoint_index + 1}/{waypoint_count} "
+                        f"decision={decisions}",
+                        flush=True,
+                    )
                     waypoints_completed = waypoint_index + 1
                     waypoint_index += 1
                     waypoint_motion_chunks = 0
@@ -437,6 +443,14 @@ class NavigationRunner:
                     continue
                 if waypoint_count:
                     waypoints_completed = waypoint_count
+                print(
+                    "MISSION_STOP_ACCEPTED "
+                    f"decision={decisions} "
+                    f"waypoint={waypoint_index + 1}/{waypoint_count}"
+                    if waypoint_count
+                    else f"MISSION_STOP_ACCEPTED decision={decisions}",
+                    flush=True,
+                )
                 metrics.update(state.root_pos_world, stop_called=True)
                 termination_reason = "stop"
                 if self.monitor is not None:

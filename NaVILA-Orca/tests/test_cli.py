@@ -58,6 +58,15 @@ def test_go2_warmup_steps_can_be_overridden():
     assert args.warmup_steps == 0
 
 
+def test_keyboard_teleop_parser_has_safe_defaults():
+    args = _build_parser().parse_args(["teleop", "--no-preview"])
+    assert args.func.__name__ == "_teleop"
+    assert args.forward_speed == 0.5
+    assert args.command_hold == 0.35
+    assert args.max_control_steps == 0
+    assert args.no_preview is True
+
+
 def test_instruction_file_overrides_dataset_prompt(tmp_path):
     prompt_path = tmp_path / "prompt.txt"
     prompt_path.write_text("  Walk to the cabinet and stop.\n", encoding="utf-8")

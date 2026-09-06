@@ -23,7 +23,7 @@
       "display_name": "glasses case",
       "aliases": ["glasses", "spectacles", "eyeglasses", "glasses case"],
       "search_locations": [
-        "the kitchen-facing side of the dining table",
+        "the dining table in the kitchen",
         "the living-room side table",
         "the entryway belongings tray"
       ]
@@ -93,12 +93,12 @@
     },
     "dining_area": {
       "aliases": ["dining area", "dining table", "table"],
-      "navigation_instruction": "Find the dining table surrounded by four chairs, approach its kitchen-facing side, and stop one meter away."
+      "navigation_instruction": "Find the dining table in the kitchen, approach through clear floor space, and stop near the table."
     }
   },
   "leaving_checklist": ["phone", "keys", "wallet", "glasses", "hearing_aid"],
   "default_search_locations": [
-    "the kitchen-facing side of the dining table",
+    "the dining table in the kitchen",
     "the kitchen counter and nearby accessible surfaces",
     "the living-room side table",
     "the entryway belongings tray"

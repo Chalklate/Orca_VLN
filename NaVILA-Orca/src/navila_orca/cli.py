@@ -718,7 +718,7 @@ def _add_renderer_options(parser: argparse.ArgumentParser) -> None:
         nargs=3,
         metavar=("X", "Y", "Z"),
         default=list(DEFAULT_CAMERA_MOUNT_POSITION),
-        help="Go2 base-frame camera translation (original NaVILA default: 0.1 0 0.5)",
+        help="Go2 base-frame camera translation (default: 0.1 0 0.6)",
     )
     parser.add_argument(
         "--camera-mount-quat-wxyz",

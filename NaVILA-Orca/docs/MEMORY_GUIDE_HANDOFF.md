@@ -179,7 +179,8 @@ Missing functionality:
 - No stale-memory fallback during a running mission.
 - No medication `present` versus `misplaced` classification.
 - No structured per-mission report separate from `measurements.json`.
-- No dedicated UI, voice input, speech output, or caregiver service.
+- No dedicated UI, speech output, or caregiver service. A command-line voice
+  query path is now available through `run_orcalab_memory_guide.sh --voice`.
 - No real-Go2 sensor, RGB-D, LiDAR, ROS, or SLAM adapter.
 
 Manual `remember` is still required:
@@ -187,7 +188,7 @@ Manual `remember` is still required:
 ```bash
 ./scripts/memory_guide.sh remember \
   --item glasses \
-  --location "the kitchen-facing side of the dining table" \
+  --location "the dining table in the kitchen" \
   --room "dining area" \
   --confidence 0.95
 ```
@@ -361,7 +362,7 @@ Do not implement these before the required scenarios are reliable:
 - Locomotion retraining
 - Jumping, standing tall, or custom joint poses
 - Grasping or carrying objects
-- Voice recognition or text-to-speech
+- Text-to-speech
 - Mobile application or cloud database
 - GPS/family tracking
 - Authentication/caregiver backend

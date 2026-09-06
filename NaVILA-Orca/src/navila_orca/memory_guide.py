@@ -1,4 +1,4 @@
-"""Deterministic mission routing and item memory for the Memory Guide MVP."""
+"""Mission routing and item memory for the Memory Guide MVP."""
 
 from __future__ import annotations
 
@@ -29,11 +29,13 @@ _PUNCTUATION_RE = re.compile(r"[^a-z0-9\s-]")
 
 @dataclass(frozen=True, slots=True)
 class ParsedQuery:
-    """Structured user request produced without invoking the navigation VLM."""
+    """Structured user request produced before invoking the navigation VLM."""
 
     intent: str
     target: str | None
     original: str
+    router: str = "deterministic"
+    confidence: float | None = None
 
 
 def _now_utc() -> datetime:
@@ -51,12 +53,108 @@ def _parse_timestamp(value: str) -> datetime:
     return parsed.astimezone(timezone.utc)
 
 
-def parse_query(query: str, catalog: Mapping[str, Any]) -> ParsedQuery:
-    """Classify a resident request and resolve known item/place aliases."""
+def _normalise_identifier(text: str) -> str:
+    """Turn an open-vocabulary item name into a stable inventory key."""
+
+    return re.sub(r"[^a-z0-9]+", "_", str(text).lower()).strip("_")
+
+
+def _unsupported_request_error() -> ValueError:
+    return ValueError(
+        "unsupported request; try 'Where are my glasses?', "
+        "'Patrol the home', or 'Guide me to the bathroom'"
+    )
+
+
+def _parse_router_decision(
+    query: str,
+    catalog: Mapping[str, Any],
+    decision: Any,
+    *,
+    router: str,
+) -> ParsedQuery:
+    """Validate a provider decision against the local catalog and query text."""
+
+    original = str(query).strip()
+    intent = str(decision.intent)
+    target = decision.target_id
+    confidence = float(decision.confidence)
+    if intent == "find_item":
+        # Prefer an exact known alias from the original request. This prevents
+        # a model typo from replacing a catalog item that is plainly present.
+        known_item = _resolve_alias(original, catalog.get("items", {}), within_text=True)
+        target_id = known_item or _resolve_alias(
+            str(target or ""), catalog.get("items", {})
+        )
+        if target_id is None:
+            target_id = _normalise_identifier(str(target or ""))
+        if not target_id:
+            raise _unsupported_request_error()
+        return ParsedQuery("find_item", target_id, original, router, confidence)
+
+    if intent == "navigate_place":
+        target_id = _resolve_alias(str(target or ""), catalog.get("places", {}))
+        if target_id is None:
+            target_id = _resolve_alias(
+                original, catalog.get("places", {}), within_text=True
+            )
+        if target_id is None:
+            raise _unsupported_request_error()
+        return ParsedQuery("navigate_place", target_id, original, router, confidence)
+
+    if intent == "patrol":
+        return ParsedQuery("patrol", None, original, router, confidence)
+    if intent == "leaving_checklist":
+        return ParsedQuery("leaving_checklist", None, original, router, confidence)
+    raise _unsupported_request_error()
+
+
+def parse_query(
+    query: str,
+    catalog: Mapping[str, Any],
+    *,
+    llm_mode: str = "deterministic",
+    bedrock_router: Any | None = None,
+    openai_router: Any | None = None,
+) -> ParsedQuery:
+    """Classify a resident request and resolve known item/place aliases.
+
+    ``bedrock`` and ``openai`` modes use an LLM only for intent and target
+    extraction. The deterministic planner remains responsible for inventory
+    freshness, map resolution, waypoint generation, and all navigation actions.
+    """
 
     original = str(query).strip()
     if not original:
         raise ValueError("query must not be empty")
+    if llm_mode == "bedrock":
+        if bedrock_router is None:
+            from .bedrock_router import BedrockQueryRouter
+
+            bedrock_router = BedrockQueryRouter.from_environment()
+        decision = bedrock_router.route(original, catalog)
+        return _parse_router_decision(
+            original,
+            catalog,
+            decision,
+            router="bedrock:nova-micro",
+        )
+    if llm_mode == "openai":
+        if openai_router is None:
+            from .openai_router import OpenAIQueryRouter
+
+            openai_router = OpenAIQueryRouter.from_environment()
+        decision = openai_router.route(original, catalog)
+        return _parse_router_decision(
+            original,
+            catalog,
+            decision,
+            router=str(
+                getattr(openai_router, "router_name", "openai:gpt-5.6-luna")
+            ),
+        )
+    if llm_mode != "deterministic":
+        raise ValueError(f"unsupported query-router mode: {llm_mode}")
     normalised = _normalise(original)
 
     if any(phrase in normalised for phrase in ("what do i need", "checklist", "have everything")):
@@ -101,10 +199,7 @@ def parse_query(query: str, catalog: Mapping[str, Any]) -> ParsedQuery:
     if unknown_match:
         return ParsedQuery("find_item", unknown_match.group(1).strip(), original)
 
-    raise ValueError(
-        "unsupported request; try 'Where are my glasses?', "
-        "'Patrol the home', or 'Guide me to the bathroom'"
-    )
+    raise _unsupported_request_error()
 
 
 def _resolve_alias(
@@ -322,16 +417,48 @@ def plan_query(
     max_age_hours: float = 24.0,
     now: datetime | None = None,
     semantic_map: Mapping[str, Any] | None = None,
+    llm_mode: str = "deterministic",
+    bedrock_router: Any | None = None,
+    bedrock_region: str | None = None,
+    bedrock_model_id: str | None = None,
+    bedrock_profile: str | None = None,
+    openai_router: Any | None = None,
+    openai_model_id: str | None = None,
+    openai_base_url: str | None = None,
 ) -> dict[str, Any]:
     """Route a natural request to direct guidance or a staged patrol."""
 
-    parsed = parse_query(query, catalog)
+    if llm_mode == "bedrock" and bedrock_router is None:
+        from .bedrock_router import BedrockQueryRouter
+
+        bedrock_router = BedrockQueryRouter.from_environment(
+            region=bedrock_region,
+            model_id=bedrock_model_id,
+            profile=bedrock_profile,
+        )
+    if llm_mode == "openai" and openai_router is None:
+        from .openai_router import OpenAIQueryRouter
+
+        openai_router = OpenAIQueryRouter.from_environment(
+            model_id=openai_model_id,
+            base_url=openai_base_url,
+        )
+    parsed = parse_query(
+        query,
+        catalog,
+        llm_mode=llm_mode,
+        bedrock_router=bedrock_router,
+        openai_router=openai_router,
+    )
     plan: dict[str, Any] = {
         "version": 1,
         "query": parsed.original,
         "intent": parsed.intent,
         "target": parsed.target,
+        "query_router": parsed.router,
     }
+    if parsed.confidence is not None:
+        plan["query_confidence"] = round(parsed.confidence, 4)
 
     if parsed.intent == "navigate_place":
         place = catalog["places"][parsed.target]
@@ -454,6 +581,40 @@ def _build_parser() -> argparse.ArgumentParser:
     plan.add_argument("--confidence-threshold", type=float, default=0.65)
     plan.add_argument("--max-age-hours", type=float, default=24.0)
     plan.add_argument(
+        "--llm-mode",
+        choices=("deterministic", "bedrock", "openai"),
+        default=os.environ.get("NAVILA_MEMORY_LLM_MODE", "deterministic"),
+        help="query router: deterministic rules, Bedrock Nova Micro, or OpenAI",
+    )
+    plan.add_argument(
+        "--bedrock-region",
+        default=os.environ.get("NAVILA_BEDROCK_REGION")
+        or os.environ.get("AWS_REGION")
+        or os.environ.get("AWS_DEFAULT_REGION")
+        or "ap-southeast-1",
+    )
+    plan.add_argument(
+        "--bedrock-model-id",
+        default=os.environ.get("NAVILA_BEDROCK_MODEL_ID", "amazon.nova-micro-v1:0"),
+    )
+    plan.add_argument(
+        "--bedrock-profile",
+        default=os.environ.get(
+            "NAVILA_BEDROCK_PROFILE", "683803166476_hack2026_IsbUsersPS"
+        ),
+        help="boto3 profile for Bedrock credentials",
+    )
+    plan.add_argument(
+        "--openai-model-id",
+        default=os.environ.get("NAVILA_OPENAI_MODEL", "gpt-5.6-luna"),
+        help="OpenAI model ID",
+    )
+    plan.add_argument(
+        "--openai-base-url",
+        default=os.environ.get("NAVILA_OPENAI_BASE_URL"),
+        help="optional OpenAI-compatible API base URL",
+    )
+    plan.add_argument(
         "--semantic-map",
         type=Path,
         help="pose-tagged teleop semantic map used to annotate locations with recorded views",
@@ -500,6 +661,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                     if args.semantic_map is not None
                     else None
                 ),
+                llm_mode=args.llm_mode,
+                bedrock_region=args.bedrock_region,
+                bedrock_model_id=args.bedrock_model_id,
+                bedrock_profile=args.bedrock_profile,
+                openai_model_id=args.openai_model_id,
+                openai_base_url=args.openai_base_url,
             )
             write_plan(plan, args.plan_output, args.waypoint_output)
             print(json.dumps(plan, indent=2, ensure_ascii=False))

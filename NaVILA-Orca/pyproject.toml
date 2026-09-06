@@ -14,6 +14,15 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+voice = [
+  "google-auth>=2.14.1",
+]
+bedrock = [
+  "boto3>=1.35.0,<2",
+]
+openai = [
+  "openai>=1.0.0,<2",
+]
 orca = [
   "av==18.0.0",
   "opencv-python==5.0.0.93",

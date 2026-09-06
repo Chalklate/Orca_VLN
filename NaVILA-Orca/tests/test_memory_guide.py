@@ -37,7 +37,7 @@ def test_recent_confident_memory_routes_directly(catalog):
     remember_item(
         inventory,
         item_id="glasses",
-        location="the kitchen-facing side of the dining table",
+        location="the dining table in the kitchen",
         confidence=0.95,
         observed_at="2026-09-03T10:00:00Z",
     )

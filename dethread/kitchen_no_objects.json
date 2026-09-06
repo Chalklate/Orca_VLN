@@ -1,0 +1,226 @@
+{
+    "version": "3.0",
+    "viewport_camera_transform": {
+        "position": [
+            0.8840579986572266,
+            7.5904340744018555,
+            1.1655811071395874
+        ],
+        "rotation": [
+            0.6793021568407079,
+            -0.13432796316645085,
+            -0.13995437341954534,
+            0.7077551493163842
+        ]
+    },
+    "actors": [
+        {
+            "name": "Group",
+            "path": "/Group",
+            "type": "GroupActor",
+            "transform": {
+                "position": [
+                    0.0,
+                    0.0,
+                    0.0
+                ],
+                "rotation": [
+                    1.0,
+                    0.0,
+                    0.0,
+                    0.0
+                ],
+                "scale": 1.0
+            },
+            "children": [
+                {
+                    "name": "Interactive",
+                    "path": "/Group/Interactive",
+                    "type": "GroupActor",
+                    "transform": {
+                        "position": [
+                            0.0,
+                            0.0,
+                            0.0
+                        ],
+                        "rotation": [
+                            1.0,
+                            0.0,
+                            0.0,
+                            0.0
+                        ],
+                        "scale": 1.0
+                    },
+                    "children": [
+                        {
+                            "name": "Croissant",
+                            "path": "/Group/Interactive/Croissant",
+                            "type": "AssetActor",
+                            "transform": {
+                                "position": [
+                                    0.039186760783195496,
+                                    7.370475769042969,
+                                    0.7370901107788086
+                                ],
+                                "rotation": [
+                                    1.0,
+                                    0.0,
+                                    0.0,
+                                    0.0
+                                ],
+                                "scale": 1.0
+                            },
+                            "is_visible": false,
+                            "asset_path": "assets/e071469a36d3c8aa/diningtable/simple_case_robot/diningtableseries/croissant"
+                        },
+                        {
+                            "name": "Banana",
+                            "path": "/Group/Interactive/Banana",
+                            "type": "AssetActor",
+                            "transform": {
+                                "position": [
+                                    -0.05504024028778076,
+                                    7.915431499481201,
+                                    0.7201093435287476
+                                ],
+                                "rotation": [
+                                    1.0,
+                                    0.0,
+                                    0.0,
+                                    0.0
+                                ],
+                                "scale": 1.0
+                            },
+                            "is_visible": false,
+                            "asset_path": "assets/e071469a36d3c8aa/diningtable/simple_case_robot/diningtableseries/banana"
+                        },
+                        {
+                            "name": "Orange",
+                            "path": "/Group/Interactive/Orange",
+                            "type": "AssetActor",
+                            "transform": {
+                                "position": [
+                                    -0.20178094506263733,
+                                    7.775650978088379,
+                                    0.7407549619674683
+                                ],
+                                "rotation": [
+                                    1.0,
+                                    0.0,
+                                    0.0,
+                                    0.0
+                                ],
+                                "scale": 1.0
+                            },
+                            "is_visible": false,
+                            "asset_path": "assets/e071469a36d3c8aa/diningtable/simple_case_robot/diningtableseries/orange"
+                        },
+                        {
+                            "name": "Toast",
+                            "path": "/Group/Interactive/Toast",
+                            "type": "AssetActor",
+                            "transform": {
+                                "position": [
+                                    0.023742839694023132,
+                                    7.56664514541626,
+                                    0.73939448595047
+                                ],
+                                "rotation": [
+                                    1.0,
+                                    0.0,
+                                    0.0,
+                                    0.0
+                                ],
+                                "scale": 1.0
+                            },
+                            "is_visible": false,
+                            "asset_path": "assets/e071469a36d3c8aa/diningtable/simple_case_robot/diningtableseries/toast"
+                        },
+                        {
+                            "name": "ThermosCup",
+                            "path": "/Group/Interactive/ThermosCup",
+                            "type": "AssetActor",
+                            "transform": {
+                                "position": [
+                                    0.007580444216728211,
+                                    6.886046409606934,
+                                    0.7289311289787292
+                                ],
+                                "rotation": [
+                                    1.0,
+                                    0.0,
+                                    0.0,
+                                    0.0
+                                ],
+                                "scale": 1.0
+                            },
+                            "is_visible": false,
+                            "asset_path": "assets/e071469a36d3c8aa/diningtable/simple_case_robot/diningtableseries/thermoscup"
+                        },
+                        {
+                            "name": "FruitsBasket",
+                            "path": "/Group/Interactive/FruitsBasket",
+                            "type": "AssetActor",
+                            "transform": {
+                                "position": [
+                                    0.02147690951824188,
+                                    7.4360809326171875,
+                                    0.7140851616859436
+                                ],
+                                "rotation": [
+                                    1.0,
+                                    0.0,
+                                    0.0,
+                                    0.0
+                                ],
+                                "scale": 1.0
+                            },
+                            "asset_path": "assets/e071469a36d3c8aa/diningtable/simple_case_robot/diningtableseries/fruitsbasket"
+                        },
+                        {
+                            "name": "GlassCover",
+                            "path": "/Group/Interactive/GlassCover",
+                            "type": "AssetActor",
+                            "transform": {
+                                "position": [
+                                    0.016970306634902954,
+                                    7.433468818664551,
+                                    0.7183200716972351
+                                ],
+                                "rotation": [
+                                    1.0,
+                                    0.0,
+                                    0.0,
+                                    0.0
+                                ],
+                                "scale": 1.0
+                            },
+                            "is_visible": false,
+                            "asset_path": "assets/e071469a36d3c8aa/diningtable/simple_case_robot/diningtableseries/glasscover"
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "quadruped_robot_platform_1",
+            "path": "/quadruped_robot_platform_1",
+            "type": "AssetActor",
+            "transform": {
+                "position": [
+                    -0.2599325180053711,
+                    2.7954320907592773,
+                    -0.04599818214774132
+                ],
+                "rotation": [
+                    0.6820570620610229,
+                    0.0,
+                    0.0,
+                    0.731298956715163
+                ],
+                "scale": 1.0
+            },
+            "asset_path": "assets/e071469a36d3c8aa/unitree_robots/prefabs/go2_usda"
+        }
+    ]
+}

@@ -29,7 +29,9 @@ from PIL import Image
 
 DEFAULT_CAMERA_ACTOR_NAME = "navila_ego"
 DEFAULT_CAMERA_ASSET = "prefabs/agentcamera"
-DEFAULT_CAMERA_MOUNT_POSITION = (0.1, 0.0, 0.5)
+# The Go2 base sits roughly 0.4 m above the floor in the standing scene, so a
+# 0.8 m base-frame mount gives an approximately 1.2 m camera height.
+DEFAULT_CAMERA_MOUNT_POSITION = (0.1, 0.0, 0.8)
 # The NavVLM camera uses (-0.5, 0.5, -0.5, 0.5) under its source camera-frame
 # convention. Orca's CameraSensor post-multiplies AtomToRos, so
 # the equivalent forward +X / image-up +Z entity rotation is yaw -90 degrees.

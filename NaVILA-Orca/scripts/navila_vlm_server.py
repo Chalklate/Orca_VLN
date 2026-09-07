@@ -53,7 +53,7 @@ class NaVILAServer:
         tokenizer, model, image_processor, _ = load_pretrained_model(
             args.model_path,
             model_name,
-            None,
+            args.model_base,
             device=args.device,
         )
         self.tokenizer = tokenizer
@@ -153,6 +153,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=54321)
     parser.add_argument("--model_path", required=True)
+    parser.add_argument(
+        "--model_base",
+        default=None,
+        help=(
+            "base NaVILA model directory when model_path is an unmerged LoRA "
+            "adapter directory"
+        ),
+    )
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--conv_mode", default="llama_3")
     parser.add_argument("--num_video_frames", type=int, default=8)

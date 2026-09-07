@@ -52,6 +52,18 @@ python scripts/label_decision_samples.py \
   outputs/training_runs/bread_start_from_table --interactive
 ```
 
+If a human has verified that every existing baseline action in a run is
+correct, accept those baseline actions explicitly without retyping them:
+
+```bash
+python scripts/label_decision_samples.py \
+  outputs/training_runs/bread_start_from_table/decision_samples \
+  --accept-baseline
+```
+
+This is deliberately a separate flag: an empty interactive response does not
+mean that the baseline is correct.
+
 Export only reviewed records for later conversion to the exact NaVILA release
 format:
 
@@ -61,6 +73,45 @@ python scripts/export_vln_sft_records.py \
   --decision-samples \
   --output outputs/training_records/reviewed.jsonl
 ```
+
+Package the reviewed records for the upstream NaVILA training loader. This
+step copies the eight source frames into a portable bundle, writes
+`train.jsonl`, and normalizes reviewed labels to the canonical NaVILA response
+vocabulary:
+
+```bash
+python scripts/export_navila_lora_dataset.py \
+  outputs/training_records/reviewed.jsonl \
+  --output-dir outputs/training_records/navila_orca
+```
+
+If the labels are already written into a decision-sample manifest, the
+intermediate export can be skipped:
+
+```bash
+python scripts/export_navila_lora_dataset.py \
+  outputs/training_runs/bread_start_from_table/decision_samples/manifest.jsonl \
+  --output-dir outputs/training_records/navila_orca
+```
+
+The resulting directory contains relative image paths, the same navigation
+prompt wrapper as `scripts/navila_vlm_server.py` with eight `<image>` tokens,
+and one target action per record. Unreviewed records are excluded. With
+multiple episodes, a grouped holdout can be created using
+`--validation-fraction 0.2`; records from the same episode stay in the same
+split.
+
+Older reviewer manifests may contain `review_status: "reviewed"` with a null
+`target_action`. The packager warns and excludes those records; it never
+silently treats the baseline action as the human target. Label them explicitly
+or clear their status with `label_decision_samples.py --unreview` before
+re-exporting.
+
+The model-agnostic exporter and this NaVILA packager are intentionally separate:
+the former preserves review evidence, while the latter targets NaVILA's
+eight-frame LLaVA conversation format. Register the resulting
+`navila_orca/train.jsonl` in the NaVILA `datasets_mixture.py` file and use its
+dataset name with the LoRA training script.
 
 Existing rollout directories without `decision_samples/` remain valid raw
 rollout evidence, but they cannot be retroactively reconstructed into exact
@@ -102,6 +153,19 @@ Use LoRA when a full NaVILA fine-tune is unnecessary. In the NaVILA training env
 5. Re-run the same fixed Orca_VLN episodes before changing scene assets.
 
 The exact target modules, image processor, and launch command are determined by the NaVILA release used by the organizer. The competition baseline intentionally does not hard-code them.
+
+The Orca_VLN server can load an unmerged LoRA directory together with its
+base model. Copy the adapter directory to the machine running the VLM server,
+then launch it with:
+
+```bash
+NAVVLM_MODEL_PATH=/absolute/path/to/orca_navila_lora \
+NAVVLM_MODEL_BASE=/absolute/path/to/navila-llama3-8b-8f \
+./scripts/start_navvlm_server.sh
+```
+
+The server merges the adapter in memory at startup; the simulator continues to
+use the same TCP protocol and does not need to know that the model is adapted.
 
 ## Evaluation checklist
 

@@ -43,6 +43,14 @@ def _parser() -> argparse.ArgumentParser:
         help="prompt for a target action for every unreviewed decision",
     )
     parser.add_argument(
+        "--accept-baseline",
+        action="store_true",
+        help=(
+            "mark every unlabelled decision as reviewed using its existing "
+            "baseline_output; use only after human verification"
+        ),
+    )
+    parser.add_argument(
         "--list",
         action="store_true",
         help="list decisions and current labels without changing files",
@@ -141,9 +149,19 @@ def main() -> int:
         raise ValueError("--unreview cannot be combined with --label")
     if args.unreview and args.interactive:
         raise ValueError("--unreview cannot be combined with --interactive")
+    if args.accept_baseline and (
+        args.decision is not None
+        or args.label is not None
+        or args.unreview
+        or args.interactive
+    ):
+        raise ValueError(
+            "--accept-baseline cannot be combined with --decision, --label, "
+            "--unreview, or --interactive"
+        )
     if args.interactive and (args.label is not None or args.decision is not None):
         raise ValueError("--interactive cannot be combined with --decision or --label")
-    if not args.interactive and args.decision is None:
+    if not args.interactive and not args.accept_baseline and args.decision is None:
         raise ValueError("provide --decision/--label or use --interactive")
 
     by_decision = {int(record["decision"]): record for record in records}
@@ -161,17 +179,32 @@ def main() -> int:
         print(_describe(record))
         changed = True
     else:
-        for record in records:
-            if record.get("review_status") == "reviewed":
-                continue
-            print(_describe(record))
-            label = input("target action (blank=skip, q=quit): ").strip()
-            if label.lower() == "q":
-                break
-            if not label:
-                continue
-            _apply_label(record, label, args.reviewer)
-            changed = True
+        if args.accept_baseline:
+            accepted_count = 0
+            for record in records:
+                if record.get("target_action") is not None:
+                    continue
+                baseline = str(record.get("baseline_output", "")).strip()
+                if not baseline:
+                    raise ValueError(
+                        f"decision {record.get('decision')} has no baseline_output"
+                    )
+                _apply_label(record, baseline, args.reviewer)
+                changed = True
+                accepted_count += 1
+            print(f"accepted baseline actions for {accepted_count} records")
+        else:
+            for record in records:
+                if record.get("review_status") == "reviewed":
+                    continue
+                print(_describe(record))
+                label = input("target action (blank=skip, q=quit): ").strip()
+                if label.lower() == "q":
+                    break
+                if not label:
+                    continue
+                _apply_label(record, label, args.reviewer)
+                changed = True
 
     if changed:
         _write_records(sample_root, records)

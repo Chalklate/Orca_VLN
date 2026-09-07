@@ -6,4 +6,11 @@ __pycache__/
 dist/
 build/
 outputs/
-
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+credentials*.json
+secrets*.json
+*service-account*.json

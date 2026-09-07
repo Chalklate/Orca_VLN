@@ -2,15 +2,15 @@
     "version": "3.0",
     "viewport_camera_transform": {
         "position": [
-            0.8840579986572266,
-            7.5904340744018555,
-            1.1655811071395874
+            -1.0102992057800293,
+            0.6975693106651306,
+            1.4709782600402832
         ],
         "rotation": [
-            0.6793021568407079,
-            -0.13432796316645085,
-            -0.13995437341954534,
-            0.7077551493163842
+            0.9526540782035832,
+            -0.1906294702700184,
+            0.046478447280545815,
+            -0.23227218147045298
         ]
     },
     "actors": [
@@ -70,7 +70,6 @@
                                 ],
                                 "scale": 1.0
                             },
-                            "is_visible": false,
                             "asset_path": "assets/e071469a36d3c8aa/diningtable/simple_case_robot/diningtableseries/croissant"
                         },
                         {
@@ -133,7 +132,6 @@
                                 ],
                                 "scale": 1.0
                             },
-                            "is_visible": false,
                             "asset_path": "assets/e071469a36d3c8aa/diningtable/simple_case_robot/diningtableseries/toast"
                         },
                         {
@@ -208,19 +206,254 @@
             "type": "AssetActor",
             "transform": {
                 "position": [
-                    -0.2599325180053711,
-                    2.7954320907592773,
+                    -0.5519126653671265,
+                    2.6526970863342285,
                     -0.04599818214774132
                 ],
                 "rotation": [
-                    0.6820570620610229,
+                    0.6889346602777175,
                     0.0,
                     0.0,
-                    0.731298956715163
+                    0.7248234501366703
                 ],
                 "scale": 1.0
             },
-            "asset_path": "assets/e071469a36d3c8aa/unitree_robots/prefabs/go2_usda"
+            "asset_path": "assets/e071469a36d3c8aa/unitree_robots/prefabs/go2_usda",
+            "entity_overrides": [
+                {
+                    "entity_path": [],
+                    "group_overrids": [
+                        {
+                            "type_id": "{22B10178-39B6-4C12-BB37-77DB45FDD3B6}",
+                            "type_index": 0,
+                            "property_overrides": [
+                                {
+                                    "name": "translate.x",
+                                    "value": -0.5519126653671265,
+                                    "type": "float"
+                                },
+                                {
+                                    "name": "translate.y",
+                                    "value": 2.6526970863342285,
+                                    "type": "float"
+                                },
+                                {
+                                    "name": "rotate.z",
+                                    "value": 73.00000762939453,
+                                    "type": "float"
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "metal_hook_1",
+            "path": "/metal_hook_1",
+            "type": "AssetActor",
+            "transform": {
+                "position": [
+                    2.5190865993499756,
+                    5.516515254974365,
+                    0.5723282098770142
+                ],
+                "rotation": [
+                    0.7071067513842252,
+                    -0.7071068109888685,
+                    0.0,
+                    0.0
+                ],
+                "scale": 1.0
+            },
+            "asset_path": "assets/e071469a36d3c8aa/kitchen_night_2/kitchen_night/prop/prefabs/hook_01",
+            "entity_overrides": [
+                {
+                    "entity_path": [],
+                    "group_overrids": [
+                        {
+                            "type_id": "{22B10178-39B6-4C12-BB37-77DB45FDD3B6}",
+                            "type_index": 0,
+                            "property_overrides": [
+                                {
+                                    "name": "translate.x",
+                                    "value": 2.5190865993499756,
+                                    "type": "float"
+                                },
+                                {
+                                    "name": "translate.y",
+                                    "value": 5.516515254974365,
+                                    "type": "float"
+                                },
+                                {
+                                    "name": "translate.z",
+                                    "value": 0.5723282098770142,
+                                    "type": "float"
+                                },
+                                {
+                                    "name": "rotate.x",
+                                    "value": -90.00000762939453,
+                                    "type": "float"
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "metal_hook_2",
+            "path": "/metal_hook_2",
+            "type": "AssetActor",
+            "transform": {
+                "position": [
+                    2.4550111293792725,
+                    5.502995491027832,
+                    0.570706844329834
+                ],
+                "rotation": [
+                    0.7071067513842252,
+                    -0.7071068109888685,
+                    0.0,
+                    0.0
+                ],
+                "scale": 1.0
+            },
+            "asset_path": "assets/e071469a36d3c8aa/kitchen_fluid/kitchen_night/prop/prefabs/hook_01",
+            "entity_overrides": [
+                {
+                    "entity_path": [],
+                    "group_overrids": [
+                        {
+                            "type_id": "{22B10178-39B6-4C12-BB37-77DB45FDD3B6}",
+                            "type_index": 0,
+                            "property_overrides": [
+                                {
+                                    "name": "translate.x",
+                                    "value": 2.4550111293792725,
+                                    "type": "float"
+                                },
+                                {
+                                    "name": "translate.y",
+                                    "value": 5.502995491027832,
+                                    "type": "float"
+                                },
+                                {
+                                    "name": "translate.z",
+                                    "value": 0.570706844329834,
+                                    "type": "float"
+                                },
+                                {
+                                    "name": "rotate.x",
+                                    "value": -90.00000762939453,
+                                    "type": "float"
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "metal_hook_3",
+            "path": "/metal_hook_3",
+            "type": "AssetActor",
+            "transform": {
+                "position": [
+                    2.4873061180114746,
+                    5.510141372680664,
+                    0.569394052028656
+                ],
+                "rotation": [
+                    0.7071067513842252,
+                    -0.7071068109888685,
+                    0.0,
+                    0.0
+                ],
+                "scale": 1.0
+            },
+            "asset_path": "assets/e071469a36d3c8aa/kitchen_fluid/kitchen_night/prop/prefabs/hook_01",
+            "entity_overrides": [
+                {
+                    "entity_path": [],
+                    "group_overrids": [
+                        {
+                            "type_id": "{22B10178-39B6-4C12-BB37-77DB45FDD3B6}",
+                            "type_index": 0,
+                            "property_overrides": [
+                                {
+                                    "name": "translate.x",
+                                    "value": 2.4873061180114746,
+                                    "type": "float"
+                                },
+                                {
+                                    "name": "translate.y",
+                                    "value": 5.510141372680664,
+                                    "type": "float"
+                                },
+                                {
+                                    "name": "translate.z",
+                                    "value": 0.569394052028656,
+                                    "type": "float"
+                                },
+                                {
+                                    "name": "rotate.x",
+                                    "value": -90.00000762939453,
+                                    "type": "float"
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "wooden_tray_1",
+            "path": "/wooden_tray_1",
+            "type": "AssetActor",
+            "transform": {
+                "position": [
+                    2.4977431297302246,
+                    5.468377113342285,
+                    0.5572944283485413
+                ],
+                "rotation": [
+                    1.0,
+                    0.0,
+                    0.0,
+                    0.0
+                ],
+                "scale": 1.0
+            },
+            "asset_path": "assets/e071469a36d3c8aa/kitchen_fluid/hotel_bar_01/prop/cup_01/saucer_01",
+            "entity_overrides": [
+                {
+                    "entity_path": [],
+                    "group_overrids": [
+                        {
+                            "type_id": "{22B10178-39B6-4C12-BB37-77DB45FDD3B6}",
+                            "type_index": 0,
+                            "property_overrides": [
+                                {
+                                    "name": "translate.x",
+                                    "value": 2.4977431297302246,
+                                    "type": "float"
+                                },
+                                {
+                                    "name": "translate.y",
+                                    "value": 5.468377113342285,
+                                    "type": "float"
+                                },
+                                {
+                                    "name": "translate.z",
+                                    "value": 0.5572944283485413,
+                                    "type": "float"
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
         }
     ]
 }

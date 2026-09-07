@@ -240,6 +240,11 @@ VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json \
 
 ## Nsight Systems profiling
 
+<p align="center">
+  <img src="nsys_screenshot.png" alt="nsys_screenshot" width="1428">
+</p>
+
+
 Profile the NaVILA camera path, including Python functions, GIL activity, and
 OS runtime waits:
 
@@ -271,10 +276,6 @@ VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/radeon_icd.x86_64.json \
 Use the Vulkan ICD that matches the GPU on the profiling machine. The
 development runtime used the NVIDIA ICD; the second command preserves the
 Radeon ICD used for the viewport profiling capture.
-
-### Nsight Systems screenshot
-
-![Nsight Systems camera-path timeline](nsys_screenshot.png)
 
 ## LoRA fine-tuning and adapted inference
 

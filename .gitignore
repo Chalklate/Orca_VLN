@@ -1,6 +1,10 @@
 .conda/
 NaVILA/
-models/
+# Keep the trained LoRA adapter in the submission, but continue ignoring the
+# large base checkpoints and any other model artifacts.
+models/*
+!models/orca_navila_lora/
+!models/orca_navila_lora/**
 orcalab_workspace/
 .env
 .env.*

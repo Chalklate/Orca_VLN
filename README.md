@@ -1,5 +1,9 @@
 # rAIner: companion for seniors with dementia
 
+<p align="center">
+  <img src="rainer_header.png" alt="rAIner kitchen navigation scene" width="820">
+</p>
+
 An agentic visual-language navigation proof of concept for a Unitree Go2 in
 OrcaLab. A language query is converted into a small search plan; NaVILA uses
 eight ego-camera frames to choose the next movement; the navigation runner
@@ -196,6 +200,81 @@ Stop the stack with:
 ```bash
 ./scripts/memory_guide_dev.sh stop
 ```
+
+## OrcaLab MCP development loop
+
+OrcaLab must be running before the OrcaLab MCP connector is available. Once the
+GUI has initialized and MCP is listening on port `12345`, the connector can
+inspect simulation state, actors, transforms, layouts, and viewport screenshots,
+and can start or stop simulation. The supervisor waits for a successful MCP
+handshake before starting the rest of the stack.
+
+The automated development loop loads the `SimpleMovement_DiningTable` scene with
+the `dethread/kitchen2.json` layout, starts external simulation mode, and
+manages the NaVILA backend:
+
+```bash
+cd /home/kohming/Orca_VLN/NaVILA-Orca
+
+./scripts/memory_guide_dev.sh start
+./scripts/memory_guide_dev.sh run --query "Where are my glasses?"
+./scripts/memory_guide_dev.sh status
+./scripts/memory_guide_dev.sh inspect
+./scripts/memory_guide_dev.sh stop
+```
+
+The default supervisor backend is the managed AWS SSM tunnel. Set
+`NAVILA_SERVER_MODE=local` to use the local NaVILA server. Each run is stored
+under `outputs/memory_guide/runs/<run-id>/`, with
+`outputs/memory_guide/latest-run` pointing to the newest run.
+
+When launching OrcaLab manually, MCP requires the GUI to be started with the
+scene and layout selected. The NVIDIA runtime used during development was:
+
+```bash
+VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/nvidia_icd.json \
+  ~/Orca_VLN/NaVILA-Orca/scripts/start_orcalab_gui.sh \
+    --scene SimpleMovement_DiningTable \
+    --layout /home/kohming/Orca_VLN/dethread/kitchen2.json
+```
+
+## Nsight Systems profiling
+
+Profile the NaVILA camera path, including Python functions, GIL activity, and
+OS runtime waits:
+
+```bash
+nsys profile \
+  --trace=nvtx,osrt,python-gil \
+  --python-functions-trace=/home/kohming/Orca_VLN/dethread/profiling/python_camera_trace.json \
+  --python-sampling=true \
+  --python-sampling-frequency=1000 \
+  --output=/home/kohming/Orca_VLN/report-camera \
+  /home/kohming/Orca_VLN/NaVILA-Orca/scripts/run_orcalab_memory_guide.sh \
+    --query "Where are my glasses?"
+```
+
+Profile OrcaLab startup and the viewport timeline:
+
+```bash
+VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/radeon_icd.x86_64.json \
+  nsys profile \
+    --trace=nvtx \
+    --python-backtrace \
+    --stop-on-exit=true \
+    --delay=15 \
+    /home/kohming/Orca_VLN/NaVILA-Orca/scripts/start_orcalab_gui.sh \
+      --scene SimpleMovement_DiningTable \
+      --layout /home/kohming/Orca_VLN/dethread/kitchen2.json
+```
+
+Use the Vulkan ICD that matches the GPU on the profiling machine. The
+development runtime used the NVIDIA ICD; the second command preserves the
+Radeon ICD used for the viewport profiling capture.
+
+### Nsight Systems screenshot
+
+![Nsight Systems camera-path timeline](nsys_screenshot.png)
 
 ## LoRA fine-tuning and adapted inference
 

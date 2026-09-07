@@ -4,10 +4,14 @@
   <img src="rainer_header.png" alt="rAIner kitchen navigation scene" width="820">
 </p>
 
-An agentic visual-language navigation proof of concept for a Unitree Go2 in
-OrcaLab. A language query is converted into a small search plan; NaVILA uses
-eight ego-camera frames to choose the next movement; the navigation runner
-executes that movement in MuJoCo/MJLab and mirrors the pose into OrcaLab.
+An agentic voice- and language-driven visual-navigation proof of concept for a
+Unitree Go2 in OrcaLab. A spoken query is transcribed by Modal-hosted
+FireRedASR2-AED, or a typed query is accepted directly; the Memory Guide uses
+Bedrock for semantic routing, with OpenAI GPT-5.6 Luna as the backup,
+then deterministically resolves inventory and map data into a small search
+plan. NaVILA uses eight ego-camera frames to choose the next movement, and the
+navigation runner executes that movement in MuJoCo/MJLab while mirroring the
+pose into OrcaLab.
 
 ```text
 query → Memory Guide plan → eight RGB frames → NaVILA action

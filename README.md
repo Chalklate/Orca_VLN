@@ -209,6 +209,18 @@ inspect simulation state, actors, transforms, layouts, and viewport screenshots,
 and can start or stop simulation. The supervisor waits for a successful MCP
 handshake before starting the rest of the stack.
 
+This MCP control path was important because the original OrcaLab startup was
+highly manual: launch the GUI, choose the correct scene, open the matching
+layout JSON, wait for the layout to compile, switch to external simulation,
+and finally start the simulation. Missing or reordering one of those steps
+could leave the wrong layout loaded, an unavailable MCP endpoint, or a scene
+that was visible but not actually running. The supervisor now performs the
+sequence programmatically: it launches OrcaLab with the scene and layout,
+waits for the MCP handshake, queries the simulation state, calls the MCP/API
+`start_simulation` operation with `program_name=external`, waits for OrcaGym
+and the edit service, and only then starts NaVILA. Scene startup is therefore
+repeatable and fully automated; the GUI remains the visualization and MCP host.
+
 The automated development loop loads the `SimpleMovement_DiningTable` scene with
 the `dethread/kitchen2.json` layout, starts external simulation mode, and
 manages the NaVILA backend:

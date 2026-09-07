@@ -318,7 +318,7 @@ training guidance is in
 
 ### Trained adapter artifact
 
-This checkout contains the trained, unmerged adapter at:
+This checkout contains the trained LoRA checkpoint at:
 
 ```text
 /home/kohming/Orca_VLN/models/orca_navila_lora/
@@ -333,8 +333,8 @@ It was trained from the matching base checkpoint at
 `/home/kohming/Orca_VLN/models/navila-llama3-8b-8f/` on a Vast.ai instance
 using an NVIDIA H200 GPU. The adapter directory is included in this
 repository; the much larger base checkpoint remains ignored. The local server
-loads the adapter together with the base checkpoint and merges it in memory at
-startup.
+loads it with the matching base checkpoint and uses the merged model for
+inference.
 
 Important deployment boundary: the previous `NAVILA_SERVER_MODE=aws` flow is
 the organizer-managed AWS SSM inference service. It does not expose its model
@@ -346,10 +346,10 @@ for self-managed remote inference. This limitation is separate from the AWS
 Bedrock query router: Bedrock may still classify the resident query while
 NaVILA itself runs locally with your adapter.
 
-### Local NaVILA LoRA adapter
+### Local NaVILA LoRA checkpoint
 
-An unmerged LoRA adapter needs both the adapter directory and its matching base
-checkpoint. For the adapter layout used in this project:
+The checkpoint is loaded with its matching base model before inference. For the
+model layout used in this project:
 
 ```bash
 cd /path/to/Orca_VLN/NaVILA-Orca

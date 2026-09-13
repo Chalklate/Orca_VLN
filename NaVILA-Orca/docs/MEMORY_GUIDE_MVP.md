@@ -224,11 +224,64 @@ You can build the map explicitly:
   --output outputs/memory_guide/semantic_map.json
 ```
 
+Repeat `--teleop-json` to merge sessions. Anchor and route identifiers are
+namespaced by session, and image paths are made absolute:
+
+```bash
+./scripts/memory_guide.sh map-build \
+  --teleop-json outputs/memory_guide/runs/teleop-FIRST/teleop.json \
+  --teleop-json outputs/memory_guide/runs/teleop-SECOND/teleop.json \
+  --output outputs/memory_guide/semantic_map.json
+```
+
+Merging does not infer travel between sessions. Each route edge still requires
+two different consecutive marked locations in the same teleop capture.
+Normal Memory Guide launches retain all sources already listed in the output
+map while adding `latest-teleop`, so a merged map is not replaced by the newest
+session alone.
+
 Normal missions use it automatically:
 
 ```bash
 ./scripts/memory_guide_dev.sh run --query "Where is my bread?"
 ```
+
+The map builder also treats travel between consecutive groups of marked
+locations as a directed human demonstration. It stores the departure and
+arrival reference views, duration, endpoint distance, and a deduplicated
+summary of the keyboard commands. It deliberately does not replay those motor
+commands: an open-loop replay would accumulate drift and would not be portable
+to the real robot.
+
+Inspect a demonstrated route with:
+
+```bash
+./scripts/memory_guide.sh route \
+  --semantic-map outputs/memory_guide/semantic_map.json \
+  --from-location dining_table \
+  --to-location entryway_belongings_tray
+```
+
+To make a normal mission use the route graph, state the robot's known current
+location explicitly:
+
+```bash
+./scripts/memory_guide_dev.sh run \
+  --current-location dining_table \
+  --query "Where are my keys?"
+```
+
+The planner greedily orders mapped search locations along reachable forward
+demonstrations and inserts each route edge as a separate NaVILA waypoint. It
+fails instead of inventing a route when a required direction was not captured.
+Automatic recognition of the starting location is not implemented yet.
+
+Recorded routes are directional. A reverse path is rejected unless it was
+demonstrated separately. `--allow-unverified-reverse` can generate reverse
+instructions for diagnostics, but the result is marked unverified and should
+not be used unattended. The generated route-language itself also remains
+unverified until a NaVILA run completes it successfully; the map distinguishes
+that from the human-demonstrated physical traversal.
 
 Use `--no-semantic-map` on the underlying memory-guide launcher to restore the
 legacy text-only patrol. Locations without a matching teleop anchor remain

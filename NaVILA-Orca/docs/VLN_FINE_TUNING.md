@@ -113,10 +113,57 @@ eight-frame LLaVA conversation format. Register the resulting
 `navila_orca/train.jsonl` in the NaVILA `datasets_mixture.py` file and use its
 dataset name with the LoRA training script.
 
+For repeated collection, use the guarded builder instead of packaging each
+manifest by hand:
+
+```bash
+python scripts/build_navila_training.py \
+  --output-dir outputs/training_records/navila_orca_built
+```
+
+It discovers every `outputs/training_runs/*/decision_samples/manifest.jsonl`,
+deduplicates identical eight-frame histories, writes
+`collection_report.json`, and reports episode leakage and baseline/target
+disagreements. It never treats a baseline action as ground truth unless
+`--accept-baseline` is explicitly supplied. A validation split is only allowed
+when at least two distinct episodes are present:
+
+```bash
+python scripts/build_navila_training.py \
+  --output-dir outputs/training_records/navila_orca_built \
+  --validation-fraction 0.2 \
+  --overwrite
+```
+
 Existing rollout directories without `decision_samples/` remain valid raw
 rollout evidence, but they cannot be retroactively reconstructed into exact
 eight-frame decision samples. Keep them for debugging; collect new samples
 with `--collect-decisions` for training.
+
+To remove the repeated launch work, put jobs in a JSON file and run them
+sequentially while the same OrcaLab layout and VLM server remain active:
+
+```json
+[
+  {
+    "name": "entryway_from_start_a",
+    "scenario": "scenes/vln_presentation/demo_episode.json",
+    "instruction": "Navigate to the entryway and inspect it. Stop when the mirror is clearly visible.",
+    "max_decisions": 8
+  }
+]
+```
+
+```bash
+python scripts/collect_navila_dataset.py collection_jobs.json \
+  --output-root outputs/training_runs/batch-01
+```
+
+The collector saves the exact eight images used for every request and leaves
+targets unreviewed. It is not a substitute for viewpoint diversity: this
+runner currently reuses the live authored layout and does not apply a
+scenario's `start_position`, so use teleop/reset or a real-robot collection
+session to obtain genuinely different views.
 
 Teams should prepare data against the exact NaVILA training release they use
 and retain at least:
@@ -153,6 +200,16 @@ Use LoRA when a full NaVILA fine-tune is unnecessary. In the NaVILA training env
 5. Re-run the same fixed Orca_VLN episodes before changing scene assets.
 
 The exact target modules, image processor, and launch command are determined by the NaVILA release used by the organizer. The competition baseline intentionally does not hard-code them.
+
+This checkout also includes `scripts/train_navila_lora.sh`. It registers the
+portable bundle through the nested NaVILA checkout using `ORCA_VLN_DATA_PATH`,
+trains an LLM-only LoRA adapter, saves intermediate checkpoints, and refuses
+to train a bundle with fewer than 32 unique records or fewer than two episodes
+unless `NAVILA_ALLOW_SMALL_DATASET=1` is set for an explicitly diagnostic run.
+The default is one conservative epoch at `1e-5`; override with
+`NAVILA_NUM_EPOCHS` and `NAVILA_LEARNING_RATE` after the held-out regression
+episodes are working. A full-model retrain is intentionally not provided by
+this launcher because it is not a safe twelve-hour path on a single A4500.
 
 The Orca_VLN server can load an unmerged LoRA directory together with its
 base model. Copy the adapter directory to the machine running the VLM server,

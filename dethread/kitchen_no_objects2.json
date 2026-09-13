@@ -1,0 +1,332 @@
+{
+    "version": "3.0",
+    "viewport_camera_transform": {
+        "position": [
+            0.03248956799507141,
+            1.0899893045425415,
+            1.5391079187393188
+        ],
+        "rotation": [
+            0.970410318595495,
+            -0.24095521152241928,
+            0.0037673473173016453,
+            -0.015172563981309038
+        ]
+    },
+    "actors": [
+        {
+            "name": "Group",
+            "path": "/Group",
+            "type": "GroupActor",
+            "transform": {
+                "position": [
+                    0.0,
+                    0.0,
+                    0.0
+                ],
+                "rotation": [
+                    1.0,
+                    0.0,
+                    0.0,
+                    0.0
+                ],
+                "scale": 1.0
+            },
+            "children": [
+                {
+                    "name": "Interactive",
+                    "path": "/Group/Interactive",
+                    "type": "GroupActor",
+                    "transform": {
+                        "position": [
+                            0.0,
+                            0.0,
+                            0.0
+                        ],
+                        "rotation": [
+                            1.0,
+                            0.0,
+                            0.0,
+                            0.0
+                        ],
+                        "scale": 1.0
+                    },
+                    "children": [
+                        {
+                            "name": "Croissant",
+                            "path": "/Group/Interactive/Croissant",
+                            "type": "AssetActor",
+                            "transform": {
+                                "position": [
+                                    0.039186760783195496,
+                                    7.370475769042969,
+                                    0.7370901107788086
+                                ],
+                                "rotation": [
+                                    1.0,
+                                    0.0,
+                                    0.0,
+                                    0.0
+                                ],
+                                "scale": 1.0
+                            },
+                            "asset_path": "assets/e071469a36d3c8aa/diningtable/simple_case_robot/diningtableseries/croissant"
+                        },
+                        {
+                            "name": "Banana",
+                            "path": "/Group/Interactive/Banana",
+                            "type": "AssetActor",
+                            "transform": {
+                                "position": [
+                                    -0.05504024028778076,
+                                    7.915431499481201,
+                                    0.7201093435287476
+                                ],
+                                "rotation": [
+                                    1.0,
+                                    0.0,
+                                    0.0,
+                                    0.0
+                                ],
+                                "scale": 1.0
+                            },
+                            "is_visible": false,
+                            "asset_path": "assets/e071469a36d3c8aa/diningtable/simple_case_robot/diningtableseries/banana"
+                        },
+                        {
+                            "name": "Orange",
+                            "path": "/Group/Interactive/Orange",
+                            "type": "AssetActor",
+                            "transform": {
+                                "position": [
+                                    -0.20178094506263733,
+                                    7.775650978088379,
+                                    0.7407549619674683
+                                ],
+                                "rotation": [
+                                    1.0,
+                                    0.0,
+                                    0.0,
+                                    0.0
+                                ],
+                                "scale": 1.0
+                            },
+                            "is_visible": false,
+                            "asset_path": "assets/e071469a36d3c8aa/diningtable/simple_case_robot/diningtableseries/orange"
+                        },
+                        {
+                            "name": "Toast",
+                            "path": "/Group/Interactive/Toast",
+                            "type": "AssetActor",
+                            "transform": {
+                                "position": [
+                                    0.023742839694023132,
+                                    7.56664514541626,
+                                    0.73939448595047
+                                ],
+                                "rotation": [
+                                    1.0,
+                                    0.0,
+                                    0.0,
+                                    0.0
+                                ],
+                                "scale": 1.0
+                            },
+                            "asset_path": "assets/e071469a36d3c8aa/diningtable/simple_case_robot/diningtableseries/toast"
+                        },
+                        {
+                            "name": "ThermosCup",
+                            "path": "/Group/Interactive/ThermosCup",
+                            "type": "AssetActor",
+                            "transform": {
+                                "position": [
+                                    0.007580444216728211,
+                                    6.886046409606934,
+                                    0.7289311289787292
+                                ],
+                                "rotation": [
+                                    1.0,
+                                    0.0,
+                                    0.0,
+                                    0.0
+                                ],
+                                "scale": 1.0
+                            },
+                            "is_visible": false,
+                            "asset_path": "assets/e071469a36d3c8aa/diningtable/simple_case_robot/diningtableseries/thermoscup"
+                        },
+                        {
+                            "name": "FruitsBasket",
+                            "path": "/Group/Interactive/FruitsBasket",
+                            "type": "AssetActor",
+                            "transform": {
+                                "position": [
+                                    0.02147690951824188,
+                                    7.4360809326171875,
+                                    0.7140851616859436
+                                ],
+                                "rotation": [
+                                    1.0,
+                                    0.0,
+                                    0.0,
+                                    0.0
+                                ],
+                                "scale": 1.0
+                            },
+                            "asset_path": "assets/e071469a36d3c8aa/diningtable/simple_case_robot/diningtableseries/fruitsbasket"
+                        },
+                        {
+                            "name": "GlassCover",
+                            "path": "/Group/Interactive/GlassCover",
+                            "type": "AssetActor",
+                            "transform": {
+                                "position": [
+                                    0.016970306634902954,
+                                    7.433468818664551,
+                                    0.7183200716972351
+                                ],
+                                "rotation": [
+                                    1.0,
+                                    0.0,
+                                    0.0,
+                                    0.0
+                                ],
+                                "scale": 1.0
+                            },
+                            "is_visible": false,
+                            "asset_path": "assets/e071469a36d3c8aa/diningtable/simple_case_robot/diningtableseries/glasscover"
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "metal_hook_1",
+            "path": "/metal_hook_1",
+            "type": "AssetActor",
+            "transform": {
+                "position": [
+                    2.5190865993499756,
+                    5.516515254974365,
+                    0.5723282098770142
+                ],
+                "rotation": [
+                    0.7071067513842252,
+                    -0.7071068109888685,
+                    0.0,
+                    0.0
+                ],
+                "scale": 1.0
+            },
+            "asset_path": "assets/e071469a36d3c8aa/kitchen_night_2/kitchen_night/prop/prefabs/hook_01"
+        },
+        {
+            "name": "metal_hook_2",
+            "path": "/metal_hook_2",
+            "type": "AssetActor",
+            "transform": {
+                "position": [
+                    2.4550111293792725,
+                    5.502995491027832,
+                    0.570706844329834
+                ],
+                "rotation": [
+                    0.7071067513842252,
+                    -0.7071068109888685,
+                    0.0,
+                    0.0
+                ],
+                "scale": 1.0
+            },
+            "asset_path": "assets/e071469a36d3c8aa/kitchen_fluid/kitchen_night/prop/prefabs/hook_01"
+        },
+        {
+            "name": "metal_hook_3",
+            "path": "/metal_hook_3",
+            "type": "AssetActor",
+            "transform": {
+                "position": [
+                    2.4873061180114746,
+                    5.510141372680664,
+                    0.569394052028656
+                ],
+                "rotation": [
+                    0.7071067513842252,
+                    -0.7071068109888685,
+                    0.0,
+                    0.0
+                ],
+                "scale": 1.0
+            },
+            "asset_path": "assets/e071469a36d3c8aa/kitchen_fluid/kitchen_night/prop/prefabs/hook_01"
+        },
+        {
+            "name": "wooden_tray_1",
+            "path": "/wooden_tray_1",
+            "type": "AssetActor",
+            "transform": {
+                "position": [
+                    2.4977431297302246,
+                    5.468377113342285,
+                    0.5572944283485413
+                ],
+                "rotation": [
+                    1.0,
+                    0.0,
+                    0.0,
+                    0.0
+                ],
+                "scale": 1.0
+            },
+            "asset_path": "assets/e071469a36d3c8aa/kitchen_fluid/hotel_bar_01/prop/cup_01/saucer_01"
+        },
+        {
+            "name": "quadruped_robot_1",
+            "path": "/quadruped_robot_1",
+            "type": "AssetActor",
+            "transform": {
+                "position": [
+                    -0.32672014832496643,
+                    2.8969709873199463,
+                    -0.04599818214774132
+                ],
+                "rotation": [
+                    0.7071067513842252,
+                    0.0,
+                    0.0,
+                    0.7071068109888685
+                ],
+                "scale": 1.0
+            },
+            "asset_path": "assets/e071469a36d3c8aa/unitree_robots/prefabs/go2_usda",
+            "entity_overrides": [
+                {
+                    "entity_path": [],
+                    "group_overrids": [
+                        {
+                            "type_id": "{22B10178-39B6-4C12-BB37-77DB45FDD3B6}",
+                            "type_index": 0,
+                            "property_overrides": [
+                                {
+                                    "name": "translate.x",
+                                    "value": -0.32672014832496643,
+                                    "type": "float"
+                                },
+                                {
+                                    "name": "translate.y",
+                                    "value": 2.8969709873199463,
+                                    "type": "float"
+                                },
+                                {
+                                    "name": "rotate.z",
+                                    "value": 90.00000762939453,
+                                    "type": "float"
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
+}

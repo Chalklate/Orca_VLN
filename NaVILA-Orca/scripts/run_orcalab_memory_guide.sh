@@ -28,6 +28,7 @@ PLAN_OUTPUT="${PROJECT_ROOT}/outputs/memory_guide/latest_plan.json"
 WAYPOINT_OUTPUT="${PROJECT_ROOT}/outputs/memory_guide/latest_waypoints.txt"
 SEMANTIC_MAP="${NAVILA_SEMANTIC_MAP:-${PROJECT_ROOT}/outputs/memory_guide/semantic_map.json}"
 TELEOP_JSON="${NAVILA_TELEOP_JSON:-${PROJECT_ROOT}/outputs/memory_guide/latest-teleop/teleop.json}"
+CURRENT_LOCATION="${NAVILA_CURRENT_LOCATION:-}"
 USE_SEMANTIC_MAP=true
 PLAN_ONLY=false
 RUN_ARGS=()
@@ -62,6 +63,7 @@ Memory options:
   --plan-only               Generate the plan without starting locomotion
   --semantic-map PATH       Use a pose-tagged teleop map (auto-built by default)
   --teleop-json PATH        Teleop collection used to rebuild the semantic map
+  --current-location NAME   Known current semantic location; enables route graph planning
   --no-semantic-map         Use the legacy text-only patrol plan
 
 The Memory Guide camera defaults to a stabilized 1.0 m base-frame mount offset
@@ -229,6 +231,15 @@ while (($#)); do
       TELEOP_JSON="${1#*=}"
       shift
       ;;
+    --current-location)
+      [[ $# -ge 2 ]] || { echo "--current-location requires a value" >&2; exit 2; }
+      CURRENT_LOCATION="$2"
+      shift 2
+      ;;
+    --current-location=*)
+      CURRENT_LOCATION="${1#*=}"
+      shift
+      ;;
     --no-semantic-map)
       USE_SEMANTIC_MAP=false
       shift
@@ -356,11 +367,15 @@ if [[ "${USE_SEMANTIC_MAP}" == true ]]; then
   if [[ -f "${TELEOP_JSON}" ]]; then
     "${NAVILA_ORCA_PYTHON}" -m navila_orca.memory_guide \
       map-build \
+      --include-existing-sources \
       --teleop-json "${TELEOP_JSON}" \
       --output "${SEMANTIC_MAP}"
   fi
   if [[ -f "${SEMANTIC_MAP}" ]]; then
     MAP_ARGS=(--semantic-map "${SEMANTIC_MAP}")
+    if [[ -n "${CURRENT_LOCATION}" ]]; then
+      MAP_ARGS+=(--current-location "${CURRENT_LOCATION}")
+    fi
     # Recorded views guide coverage inside one location waypoint.
     # Options supplied after these defaults can still override them.
     MAP_RUN_ARGS=(--max-decisions 64 --max-control-steps 2000)

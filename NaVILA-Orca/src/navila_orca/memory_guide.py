@@ -13,7 +13,12 @@ import re
 import sys
 from typing import Any, Mapping, Sequence
 
-from .semantic_map import load_semantic_map, ordered_views, resolve_location
+from .semantic_map import (
+    load_semantic_map,
+    ordered_views,
+    plan_topological_route,
+    resolve_location,
+)
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -137,7 +142,7 @@ def parse_query(
             original,
             catalog,
             decision,
-            router="bedrock:nova-micro",
+            router=f"bedrock:{getattr(bedrock_router, 'model_id', 'unknown')}",
         )
     if llm_mode == "openai":
         if openai_router is None:
@@ -408,6 +413,138 @@ def _map_waypoints(
     return waypoints, inspection_steps, unresolved
 
 
+def _route_mapped_inspections(
+    plan: dict[str, Any],
+    *,
+    semantic_map: Mapping[str, Any],
+    current_location: str,
+) -> None:
+    """Order mapped inspections and insert demonstrated route legs.
+
+    This is deliberately opt-in because current-area recognition is not yet
+    implemented. The caller must state where the robot is. Only recorded edge
+    directions are considered; missing reverse demonstrations fail closed.
+    """
+
+    steps = plan.get("inspection_steps")
+    waypoints = plan.get("waypoints")
+    if not isinstance(steps, list) or not isinstance(waypoints, list):
+        return
+    if len(steps) != len(waypoints):
+        raise ValueError("inspection steps and waypoints are inconsistent")
+
+    resolved_start = resolve_location(current_location, semantic_map)
+    if resolved_start is None:
+        raise ValueError(
+            f"current location is not in the semantic map: {current_location}"
+        )
+    start_id = resolved_start[0]
+    mapped: list[tuple[int, dict[str, Any], str]] = []
+    fallback: list[tuple[int, dict[str, Any], str]] = []
+    for index, (raw_step, raw_waypoint) in enumerate(zip(steps, waypoints)):
+        if not isinstance(raw_step, dict):
+            raise ValueError(f"inspection step {index} is invalid")
+        item = (index, raw_step, str(raw_waypoint))
+        if raw_step.get("map_location"):
+            mapped.append(item)
+        else:
+            fallback.append(item)
+
+    current_id = start_id
+    route_legs: list[dict[str, Any]] = []
+    routed_waypoints: list[str] = []
+    routed_roles: list[dict[str, Any]] = []
+    routed_steps: list[dict[str, Any]] = []
+    remaining = mapped.copy()
+    while remaining:
+        candidates: list[
+            tuple[float, int, tuple[int, dict[str, Any], str], dict[str, Any]]
+        ] = []
+        for item in remaining:
+            target_id = str(item[1]["map_location"])
+            try:
+                route = plan_topological_route(
+                    semantic_map,
+                    current_id,
+                    target_id,
+                    allow_unverified_reverse=False,
+                )
+            except ValueError:
+                continue
+            cost = 0.0
+            for edge in route["edges"]:
+                demonstration = edge.get("demonstration", {})
+                duration = (
+                    demonstration.get("duration_s")
+                    if isinstance(demonstration, Mapping)
+                    else None
+                )
+                try:
+                    cost += max(float(duration), 1.0)
+                except (TypeError, ValueError):
+                    cost += 1.0
+            candidates.append((cost, item[0], item, route))
+
+        if not candidates:
+            unreachable = ", ".join(str(item[1]["map_location"]) for item in remaining)
+            raise ValueError(
+                f"no demonstrated forward route from {current_id} to remaining "
+                f"inspection locations: {unreachable}; capture the missing direction"
+            )
+        _, _, selected, route = min(candidates, key=lambda value: (value[0], value[1]))
+        remaining.remove(selected)
+        target_id = str(selected[1]["map_location"])
+        for edge in route["edges"]:
+            routed_waypoints.append(str(edge["instruction"]))
+            routed_roles.append(
+                {
+                    "role": "route",
+                    "edge_id": edge.get("id"),
+                    "from_location": edge.get("from_location"),
+                    "to_location": edge.get("to_location"),
+                    "instruction_status": edge.get("instruction_status"),
+                }
+            )
+        routed_waypoints.append(selected[2])
+        routed_roles.append(
+            {
+                "role": "inspection",
+                "map_location": target_id,
+                "search_location": selected[1].get("search_location"),
+            }
+        )
+        routed_steps.append(selected[1])
+        route_legs.append(
+            {
+                "from_location": current_id,
+                "to_location": target_id,
+                "locations": route["locations"],
+                "edge_ids": [edge.get("id") for edge in route["edges"]],
+            }
+        )
+        current_id = target_id
+
+    for _, step, waypoint in fallback:
+        routed_waypoints.append(waypoint)
+        routed_roles.append(
+            {
+                "role": "inspection_text_fallback",
+                "search_location": step.get("search_location"),
+            }
+        )
+        routed_steps.append(step)
+
+    plan["waypoints"] = routed_waypoints
+    plan["waypoint_roles"] = routed_roles
+    plan["inspection_steps"] = routed_steps
+    plan["topological_route"] = {
+        "start_location": start_id,
+        "policy": "demonstrated_directions_only",
+        "instruction_status": "generated_unverified",
+        "legs": route_legs,
+    }
+
+
 def plan_query(
     query: str,
     *,
@@ -417,6 +554,7 @@ def plan_query(
     max_age_hours: float = 24.0,
     now: datetime | None = None,
     semantic_map: Mapping[str, Any] | None = None,
+    current_location: str | None = None,
     llm_mode: str = "deterministic",
     bedrock_router: Any | None = None,
     bedrock_region: str | None = None,
@@ -531,6 +669,12 @@ def plan_query(
                     plan["inspection_steps"] = steps
                     plan["unresolved_locations"] = unresolved
                     plan["semantic_map_used"] = True
+                    if current_location:
+                        _route_mapped_inspections(
+                            plan,
+                            semantic_map=semantic_map,
+                            current_location=current_location,
+                        )
             return plan
 
     locations = catalog.get("default_search_locations", [])
@@ -557,6 +701,12 @@ def plan_query(
             plan["inspection_steps"] = steps
             plan["unresolved_locations"] = unresolved
             plan["semantic_map_used"] = True
+            if current_location:
+                _route_mapped_inspections(
+                    plan,
+                    semantic_map=semantic_map,
+                    current_location=current_location,
+                )
     return plan
 
 
@@ -619,6 +769,13 @@ def _build_parser() -> argparse.ArgumentParser:
         type=Path,
         help="pose-tagged teleop semantic map used to annotate locations with recorded views",
     )
+    plan.add_argument(
+        "--current-location",
+        help=(
+            "known semantic start location; inserts demonstrated route legs and "
+            "reorders mapped inspections to avoid undemonstrated reverse travel"
+        ),
+    )
     plan.add_argument("--plan-output", type=Path, default=DEFAULT_PLAN)
     plan.add_argument("--waypoint-output", type=Path, default=DEFAULT_WAYPOINTS)
 
@@ -633,8 +790,31 @@ def _build_parser() -> argparse.ArgumentParser:
     map_build = subparsers.add_parser(
         "map-build", help="convert a teleop.json collection into a semantic map"
     )
-    map_build.add_argument("--teleop-json", type=Path, required=True)
+    map_build.add_argument(
+        "--teleop-json",
+        type=Path,
+        action="append",
+        required=True,
+        help="teleop session to merge; repeat for multiple sessions",
+    )
+    map_build.add_argument(
+        "--include-existing-sources",
+        action="store_true",
+        help="retain teleop sources already recorded in the output map",
+    )
     map_build.add_argument("--output", type=Path, default=DEFAULT_SEMANTIC_MAP)
+
+    route = subparsers.add_parser(
+        "route", help="find a path through demonstrated semantic-map routes"
+    )
+    route.add_argument("--semantic-map", type=Path, default=DEFAULT_SEMANTIC_MAP)
+    route.add_argument("--from-location", required=True)
+    route.add_argument("--to-location", required=True)
+    route.add_argument(
+        "--allow-unverified-reverse",
+        action="store_true",
+        help="permit generated reverse traversal of a one-way demonstration",
+    )
 
     subparsers.add_parser("list", help="show remembered item observations")
     return parser
@@ -661,6 +841,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     if args.semantic_map is not None
                     else None
                 ),
+                current_location=args.current_location,
                 llm_mode=args.llm_mode,
                 bedrock_region=args.bedrock_region,
                 bedrock_model_id=args.bedrock_model_id,
@@ -672,20 +853,39 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(json.dumps(plan, indent=2, ensure_ascii=False))
             return 0
         if args.command == "map-build":
-            from .semantic_map import build_semantic_map_from_file
+            from .semantic_map import build_semantic_map_from_files
 
-            semantic_map = build_semantic_map_from_file(args.teleop_json, args.output)
+            teleop_sources = list(args.teleop_json)
+            if args.include_existing_sources and args.output.is_file():
+                existing_map = load_semantic_map(args.output)
+                existing_sources = existing_map.get("source_teleops")
+                if not isinstance(existing_sources, list):
+                    existing_source = existing_map.get("source_teleop")
+                    existing_sources = [existing_source] if existing_source else []
+                teleop_sources = [*existing_sources, *teleop_sources]
+            semantic_map = build_semantic_map_from_files(teleop_sources, args.output)
             print(
                 json.dumps(
                     {
                         "output": str(Path(args.output).expanduser().resolve()),
                         "anchor_count": semantic_map["anchor_count"],
                         "location_count": semantic_map["location_count"],
+                        "route_count": semantic_map.get("route_count", 0),
                         "locations": semantic_map["route_order"],
                     },
                     indent=2,
                 )
             )
+            return 0
+        if args.command == "route":
+            semantic_map = load_semantic_map(args.semantic_map)
+            route_plan = plan_topological_route(
+                semantic_map,
+                args.from_location,
+                args.to_location,
+                allow_unverified_reverse=args.allow_unverified_reverse,
+            )
+            print(json.dumps(route_plan, indent=2, ensure_ascii=False))
             return 0
         if args.command == "remember":
             item_id = _resolve_alias(args.item, catalog.get("items", {}))

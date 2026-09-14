@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+PROJECT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+UNITREE_PYTHON="${UNITREE_PYTHON:-python3}"
+
+exec "${UNITREE_PYTHON}" "${PROJECT_ROOT}/scripts/run_unitree_navila.py" "$@"

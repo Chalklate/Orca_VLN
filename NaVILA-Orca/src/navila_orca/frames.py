@@ -8,12 +8,33 @@ from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
-from PIL import Image
+from PIL import Image, ImageEnhance
 
 from .contracts import RenderFrame
 
 
 NUM_VIDEO_FRAMES = 8
+
+
+def brighten_image(image: Image.Image, factor: float) -> Image.Image:
+    """Return an RGB image with brightness multiplied by ``factor``.
+
+    A factor of ``1.0`` preserves the image. Values above ``1.0`` lift the
+    image before it is encoded for the VLM; highlights may clip at the upper
+    end of the RGB range.
+    """
+
+    if factor <= 0.0:
+        raise ValueError("brightness factor must be positive")
+    return ImageEnhance.Brightness(image.convert("RGB")).enhance(float(factor))
+
+
+def brighten_images(
+    images: Sequence[Image.Image], factor: float
+) -> list[Image.Image]:
+    """Brighten a VLM image batch while preserving its frame count."""
+
+    return [brighten_image(image, factor) for image in images]
 
 
 def to_rgb_image(image: Image.Image | RenderFrame | np.ndarray) -> Image.Image:

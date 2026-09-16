@@ -20,6 +20,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT_ROOT / "src"))
 
 from navila_orca.actions import ActionParseError, parse_velocity_command  # noqa: E402
+from navila_orca.frames import brighten_images  # noqa: E402
 from navila_orca.hardware.unitree_gateway import (  # noqa: E402
     A2_GSTREAMER_PIPELINE,
     CameraCaptureWorker,
@@ -69,6 +70,12 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--vlm-port", type=int, default=54321)
     parser.add_argument("--vlm-timeout", type=_positive_float, default=120.0)
     parser.add_argument("--capture-hz", type=_positive_float, default=5.0)
+    parser.add_argument(
+        "--image-brightness",
+        type=_positive_float,
+        default=1.0,
+        help="brightness multiplier applied to frames before VLM inference (1.0 unchanged)",
+    )
     parser.add_argument("--camera-warmup-frames", type=int, default=8)
     parser.add_argument("--camera-timeout", type=_positive_float, default=15.0)
     parser.add_argument(
@@ -235,6 +242,7 @@ def main(argv: list[str] | None = None) -> int:
                 break
             camera_worker.ensure_healthy()
             images, history_frames = history.sample()
+            images = brighten_images(images, args.image_brightness)
             baseline_output = vlm.infer(images, args.instruction)
             try:
                 parsed = parse_velocity_command(baseline_output)

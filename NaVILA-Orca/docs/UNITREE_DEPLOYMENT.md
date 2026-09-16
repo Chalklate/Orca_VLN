@@ -177,11 +177,15 @@ conda activate unitree-go2-py310
   --vlm-port 54321 \
   --instruction "Walk toward the brown chair and stop next to it." \
   --max-decisions 1 \
+  --image-brightness 1.25 \
   --scene-id site-a
 ```
 
-This is a dry run. It captures eight images, queries NaVILA once, prints the
-bounded command, and records the decision without touching SportClient.
+This is a dry run. It captures eight images, brightens them by 1.25x before
+sending them to NaVILA, queries NaVILA once, prints the bounded command, and
+records the decision without touching SportClient. Use `1.0` to disable the
+adjustment; values around `1.15`–`1.35` are a reasonable starting range, but
+large values can clip highlights.
 
 ## 5. First bounded movement
 

@@ -24,6 +24,7 @@ from navila_orca.hardware.unitree_gateway import (  # noqa: E402
     A2_GSTREAMER_PIPELINE,
     CameraCaptureWorker,
     GStreamerCameraSource,
+    Go2VideoClientCameraSource,
     HardwareDecisionRecorder,
     JpegFrameHistory,
     SafeMotionExecutor,
@@ -52,8 +53,15 @@ def _parser() -> argparse.ArgumentParser:
         description="Portable A2/Go2 camera to remote-NaVILA gateway."
     )
     parser.add_argument("--instruction", required=True)
-    parser.add_argument("--robot-model", choices=("a2", "go2"), default="a2")
-    parser.add_argument("--network-interface", default="br0")
+    parser.add_argument("--robot-model", choices=("a2", "go2"), default="go2")
+    parser.add_argument(
+        "--network-interface",
+        required=True,
+        help=(
+            "local interface carrying Unitree DDS, such as enx.../enp2s0 for "
+            "Ethernet or wlp... for Wi-Fi"
+        ),
+    )
     parser.add_argument(
         "--vlm-host",
         help="remote NaVILA host; optional only with --camera-check-output",
@@ -125,6 +133,8 @@ def _validate_args(args: argparse.Namespace) -> None:
         raise ValueError("--execute-actions cannot be used with --camera-check-output")
     if args.camera_check_output is None and not str(args.vlm_host or "").strip():
         raise ValueError("--vlm-host is required unless --camera-check-output is used")
+    if args.robot_model == "go2" and args.camera_pipeline:
+        raise ValueError("--camera-pipeline applies only to the A2 camera")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -135,9 +145,6 @@ def main(argv: list[str] | None = None) -> int:
         print(f"configuration error: {exc}", file=sys.stderr)
         return 2
 
-    pipeline = args.camera_pipeline or A2_GSTREAMER_PIPELINE.format(
-        interface=args.network_interface
-    )
     output = (args.output or _default_output()).expanduser().resolve()
     episode_id = args.episode_id or output.parent.name
     limits = SafetyLimits(
@@ -161,10 +168,22 @@ def main(argv: list[str] | None = None) -> int:
     previous_sigint = signal.signal(signal.SIGINT, request_stop)
     previous_sigterm = signal.signal(signal.SIGTERM, request_stop)
     try:
+        if args.robot_model == "go2":
+            camera = Go2VideoClientCameraSource(
+                network_interface=args.network_interface,
+                initialize_channel=True,
+            )
+        else:
+            pipeline = args.camera_pipeline or A2_GSTREAMER_PIPELINE.format(
+                interface=args.network_interface
+            )
+            camera = GStreamerCameraSource(pipeline)
+
         if args.execute_actions:
             controller = UnitreeSportController(
                 robot_model=args.robot_model,
                 network_interface=args.network_interface,
+                initialize_channel=args.robot_model != "go2",
             )
             executor = SafeMotionExecutor(
                 controller, limits=limits, command_hz=args.command_hz
@@ -173,7 +192,6 @@ def main(argv: list[str] | None = None) -> int:
                 controller.balance_stand()
 
         history = JpegFrameHistory(max_frames=args.max_history_frames)
-        camera = GStreamerCameraSource(pipeline)
         camera_worker = CameraCaptureWorker(
             camera, history, capture_hz=args.capture_hz
         )

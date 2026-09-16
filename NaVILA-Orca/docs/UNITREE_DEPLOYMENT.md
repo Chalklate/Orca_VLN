@@ -1,23 +1,113 @@
 # Unitree physical deployment
 
 This is the minimal physical-robot path. OrcaLab is not installed on the
-robot. The robot captures camera frames and executes bounded high-level motion;
-the NVIDIA workstation runs NaVILA inference.
+laptop. The laptop connects to the Go2 over a local Ethernet or Wi-Fi network,
+captures camera frames, and executes bounded high-level motion; a remote NVIDIA
+machine runs NaVILA inference. The remote machine can be the existing AWS host
+reached through an SSM port-forward, or the A4500 workstation reached through
+Tailscale.
 
-## Confirmed hackathon interface
+## Target interface
 
-The supplied hackathon slides describe a Unitree A2 with:
+The current target is a Go2 reachable from the laptop over a local network. A
+direct Ethernet connection is preferred for reliability, but Wi-Fi works when
+the access point permits DDS discovery and peer-to-peer client traffic. The
+client uses:
 
-- code executed over SSH on the onboard computer;
-- `unitree_sdk2py` initialized with `ChannelFactoryInitialize(0, "br0")`;
-- `unitree_sdk2py.a2.sport.sport_client.SportClient` for motion;
-- an H.264 RTP multicast camera at `230.1.1.1:1720` on `br0`;
-- OpenCV built with GStreamer in the provided `robot-env` virtual environment.
+- `ChannelFactoryInitialize(0, <ethernet-interface>)`;
+- `unitree_sdk2py.go2.sport.sport_client.SportClient` for motion;
+- `unitree_sdk2py.go2.video.video_client.VideoClient` for JPEG camera frames.
 
-Do not replace the robot-provided OpenCV with the PyPI `opencv-python` wheel:
-that wheel may not have the required GStreamer support.
+The older A2 multicast/GStreamer adapter remains available with
+`--robot-model a2`, but it is not the default.
 
-## 1. Workstation
+### Selecting Ethernet or Wi-Fi
+
+`--network-interface` takes the laptop interface name, not the robot IP. To
+find the interface selected by Linux for a known robot address:
+
+```bash
+DOG_IP=<robot-ip>
+ip route get "${DOG_IP}"
+```
+
+Look for `dev <interface>` in the result. Typical Wi-Fi names begin with
+`wlp`, while USB Ethernet names often begin with `enx`. Confirm basic unicast
+reachability:
+
+```bash
+ping -c 3 "${DOG_IP}"
+```
+
+Successful ping is necessary but not sufficient: Unitree SDK2 uses DDS, whose
+discovery traffic may be blocked by guest Wi-Fi, AP/client isolation, VLANs,
+or multicast filtering. The camera-only test in section 3 is the definitive
+read-only check. If it times out over Wi-Fi, use direct Ethernet or a private
+router rather than proceeding to motion testing.
+
+## 1. Choose the remote inference connection
+
+### Option A: existing AWS SSM port-forward
+
+This is the simplest option if the existing AWS NaVILA service is running. The
+laptop needs Internet access, AWS CLI, the Session Manager plugin, and an
+authenticated `navila` AWS profile. It does not need an NVIDIA GPU.
+
+Verify the laptop setup before travelling:
+
+```bash
+aws --version
+session-manager-plugin --version
+aws sts get-caller-identity --profile navila --region ap-northeast-1
+```
+
+Start the tunnel in a dedicated laptop terminal and leave it running:
+
+```bash
+cd <copied-NaVILA-Orca-directory>
+./scripts/start_navila_aws_tunnel.sh
+```
+
+The helper is the physical-deployment equivalent of the AWS section in
+`memory_guide_dev.sh`. It forwards laptop address `127.0.0.1:54321` to port
+`54321` on SSM instance `i-066515f762428ba55` in `ap-northeast-1`. Override
+the defaults only if the AWS deployment changes:
+
+```bash
+NAVILA_AWS_INSTANCE_ID=<instance-id> \
+NAVILA_AWS_PROFILE=<profile> \
+NAVILA_AWS_REGION=<region> \
+NAVVLM_PORT=54321 \
+./scripts/start_navila_aws_tunnel.sh
+```
+
+In a second terminal, verify the model endpoint through the tunnel:
+
+```bash
+python3 scripts/check_navvlm_endpoint.py --host 127.0.0.1 --port 54321
+```
+
+The remote NaVILA server must already be listening on port `54321`; the tunnel
+does not start the server. If local port `54321` is occupied, launch the helper
+with `NAVVLM_PORT=154321` and use `--vlm-port 154321` in every command below.
+
+Do not source `modal.env` for this tunnel. Its `AWS_PROFILE` and region are for
+Bedrock and are different from the existing NaVILA SSM profile. The tunnel
+helper passes the `navila` profile explicitly.
+
+The SSM tunnel carries only NaVILA TCP requests. Unitree DDS, camera data, and
+motion commands remain on the local interface selected with
+`--network-interface`. The laptop can therefore use Ethernet for the robot and
+Wi-Fi or a phone hotspot for AWS. If the robot and laptop share Internet-enabled
+Wi-Fi, the same Wi-Fi interface may carry both DDS and the AWS tunnel.
+
+For all commands below, the AWS endpoint is:
+
+```text
+--vlm-host 127.0.0.1 --vlm-port 54321
+```
+
+### Option B: Tailscale to the A4500 workstation
 
 Start the existing NaVILA server on the A4500. Bind it to an address reachable
 from the robot (prefer the workstation's Tailscale address):
@@ -33,24 +123,40 @@ Validate it from another machine before using the robot:
 python3 scripts/check_navvlm_endpoint.py --host <A4500_TAILSCALE_IP>
 ```
 
-## 2. Copy the lightweight client to the robot
+For all commands below, the Tailscale endpoint is:
+
+```text
+--vlm-host <A4500_TAILSCALE_IP> --vlm-port 54321
+```
+
+## 2. Copy the lightweight client to the laptop
 
 The minimum required project content is `src/navila_orca`,
 `scripts/run_unitree_navila.py`, and `scripts/run_unitree_navila.sh`. The robot
-environment needs Pillow plus its preinstalled `unitree_sdk2py`, OpenCV, and
-GStreamer stack. It does not need CUDA, NaVILA weights, OrcaLab, or MJLab.
+environment needs Pillow, NumPy, CycloneDDS 0.10.2, and `unitree_sdk2py`. It
+does not need CUDA, NaVILA weights, OrcaLab, ROS 2, or MJLab.
+
+To rebuild the lightweight laptop archive on the development PC:
+
+```bash
+./scripts/build_unitree_deployment_bundle.sh
+```
+
+Copy `outputs/deployment/unitree-navila-client.tar.gz` to the laptop and
+extract it there. The archive includes the AWS tunnel helper and this guide.
 
 ## 3. Camera-only check
 
-On the A2 onboard computer, validate the multicast stream without requiring
-the model server or initializing SportClient:
+Connect the Go2 and laptop using direct Ethernet or the same Wi-Fi network.
+Find the correct interface as described above, then validate the SDK camera
+without requiring the model server or initializing SportClient:
 
 ```bash
 cd <copied-NaVILA-Orca-directory>
-source <robot-env>/.venv/bin/activate
+conda activate unitree-go2-py310
 ./scripts/run_unitree_navila.sh \
-  --robot-model a2 \
-  --network-interface br0 \
+  --robot-model go2 \
+  --network-interface <ethernet-interface> \
   --instruction camera-check \
   --camera-check-output /tmp/unitree-camera-check.jpg
 ```
@@ -59,15 +165,16 @@ Copy or view `/tmp/unitree-camera-check.jpg` and verify orientation and colour.
 
 ## 4. Camera plus inference smoke test (motors disabled)
 
-On the A2 onboard computer:
+On the laptop:
 
 ```bash
 cd <copied-NaVILA-Orca-directory>
-source <robot-env>/.venv/bin/activate
+conda activate unitree-go2-py310
 ./scripts/run_unitree_navila.sh \
-  --robot-model a2 \
-  --network-interface br0 \
-  --vlm-host <A4500_TAILSCALE_IP> \
+  --robot-model go2 \
+  --network-interface <ethernet-interface> \
+  --vlm-host 127.0.0.1 \
+  --vlm-port 54321 \
   --instruction "Walk toward the brown chair and stop next to it." \
   --max-decisions 1 \
   --scene-id site-a
@@ -83,9 +190,10 @@ robot, and test Unitree's own motion example first. Then arm this client:
 
 ```bash
 ./scripts/run_unitree_navila.sh \
-  --robot-model a2 \
-  --network-interface br0 \
-  --vlm-host <A4500_TAILSCALE_IP> \
+  --robot-model go2 \
+  --network-interface <ethernet-interface> \
+  --vlm-host 127.0.0.1 \
+  --vlm-port 54321 \
   --instruction "Walk toward the brown chair and stop next to it." \
   --execute-actions \
   --max-decisions 1 \

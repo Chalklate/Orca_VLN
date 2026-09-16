@@ -86,6 +86,57 @@ class GStreamerCameraSource:
         self._capture.release()
 
 
+class Go2VideoClientCameraSource:
+    """Read JPEG frames from the Go2 front camera through SDK2 VideoClient.
+
+    The VideoClient already returns a compressed JPEG byte sequence, so Pillow
+    is sufficient for decoding.  OpenCV is not required by this adapter.
+    """
+
+    def __init__(
+        self,
+        *,
+        network_interface: str,
+        timeout_s: float = 2.0,
+        initialize_channel: bool = True,
+    ) -> None:
+        if not network_interface.strip():
+            raise ValueError("network_interface must not be empty")
+        if timeout_s <= 0:
+            raise ValueError("timeout_s must be positive")
+        try:
+            channel_module = import_module("unitree_sdk2py.core.channel")
+            video_module = import_module("unitree_sdk2py.go2.video.video_client")
+        except ImportError as exc:
+            raise RuntimeError(
+                "unitree_sdk2py with Go2 VideoClient is unavailable in this "
+                "Python environment"
+            ) from exc
+        if initialize_channel:
+            channel_module.ChannelFactoryInitialize(0, network_interface)
+        self.network_interface = network_interface
+        self._client = video_module.VideoClient()
+        self._client.SetTimeout(float(timeout_s))
+        self._client.Init()
+
+    def read(self) -> Image.Image:
+        code, data = self._client.GetImageSample()
+        if code != 0:
+            raise RuntimeError(f"Go2 VideoClient GetImageSample failed with code {code}")
+        encoded = bytes(data)
+        if not encoded:
+            raise RuntimeError("Go2 VideoClient returned an empty image")
+        try:
+            with Image.open(io.BytesIO(encoded)) as image:
+                return image.convert("RGB").copy()
+        except Exception as exc:
+            raise RuntimeError("Go2 VideoClient returned an invalid JPEG image") from exc
+
+    def close(self) -> None:
+        # The SDK2 Python VideoClient exposes no close method.
+        return None
+
+
 @dataclass(frozen=True, slots=True)
 class HistoryFrame:
     sequence: int
@@ -275,6 +326,7 @@ class UnitreeSportController:
         robot_model: str = "a2",
         network_interface: str = "br0",
         timeout_s: float = 2.0,
+        initialize_channel: bool = True,
     ) -> None:
         robot_model = robot_model.lower()
         if robot_model not in self._CLIENT_MODULES:
@@ -293,7 +345,8 @@ class UnitreeSportController:
                 "robot-provided robot-env virtual environment."
             ) from exc
 
-        channel_module.ChannelFactoryInitialize(0, network_interface)
+        if initialize_channel:
+            channel_module.ChannelFactoryInitialize(0, network_interface)
         self.robot_model = robot_model
         self.network_interface = network_interface
         self._client = client_module.SportClient()

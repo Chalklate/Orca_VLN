@@ -1,4 +1,5 @@
 import json
+import io
 from types import SimpleNamespace
 
 from PIL import Image
@@ -7,6 +8,7 @@ import pytest
 from navila_orca.contracts import VelocityCommand
 from navila_orca.hardware.unitree_gateway import (
     HardwareDecisionRecorder,
+    Go2VideoClientCameraSource,
     JpegFrameHistory,
     SafeMotionExecutor,
     SafetyLimits,
@@ -179,4 +181,47 @@ def test_unitree_controller_selects_robot_module_and_initializes_channel(
         ("init",),
         ("move", 0.1, 0.0, -0.2),
         ("stop",),
+    ]
+
+
+def test_go2_video_client_decodes_jpeg_and_initializes_channel(monkeypatch):
+    calls = []
+    buffer = io.BytesIO()
+    Image.new("RGB", (12, 7), (200, 10, 20)).save(buffer, format="JPEG")
+
+    class FakeVideoClient:
+        def SetTimeout(self, timeout):
+            calls.append(("timeout", timeout))
+
+        def Init(self):
+            calls.append(("init",))
+
+        def GetImageSample(self):
+            calls.append(("image",))
+            return 0, list(buffer.getvalue())
+
+    def fake_import(name):
+        if name == "unitree_sdk2py.core.channel":
+            return SimpleNamespace(
+                ChannelFactoryInitialize=lambda domain, interface: calls.append(
+                    ("channel", domain, interface)
+                )
+            )
+        assert name == "unitree_sdk2py.go2.video.video_client"
+        return SimpleNamespace(VideoClient=FakeVideoClient)
+
+    monkeypatch.setattr(
+        "navila_orca.hardware.unitree_gateway.import_module", fake_import
+    )
+    source = Go2VideoClientCameraSource(
+        network_interface="enx123", timeout_s=4.0
+    )
+    image = source.read()
+    assert image.mode == "RGB"
+    assert image.size == (12, 7)
+    assert calls == [
+        ("channel", 0, "enx123"),
+        ("timeout", 4.0),
+        ("init",),
+        ("image",),
     ]

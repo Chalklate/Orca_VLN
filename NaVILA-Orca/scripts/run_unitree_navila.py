@@ -134,6 +134,11 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-action-seconds", type=_positive_float, default=0.75)
     parser.add_argument("--command-hz", type=_positive_float, default=50.0)
     parser.add_argument(
+        "--print-timings",
+        action="store_true",
+        help="print per-decision capture, VLM, action, pause, and total timings",
+    )
+    parser.add_argument(
         "--execute-actions",
         action="store_true",
         help="ARM MOTORS; omitted by default, so inference is recorded only",
@@ -311,16 +316,42 @@ def main(argv: list[str] | None = None) -> int:
             for waypoint_decision in range(1, args.max_decisions + 1):
                 if interrupted:
                     break
+                decision_started = time.perf_counter()
+                timings: dict[str, float] = {}
+
+                phase_started = time.perf_counter()
                 camera_worker.ensure_healthy()
+                timings["health"] = time.perf_counter() - phase_started
+
+                phase_started = time.perf_counter()
                 images, history_frames = history.sample()
+                timings["sample"] = time.perf_counter() - phase_started
+
+                phase_started = time.perf_counter()
                 images = brighten_images(images, args.image_brightness)
+                timings["preprocess"] = time.perf_counter() - phase_started
+
+                if args.print_timings:
+                    print(
+                        f"timing waypoint={waypoint_index}/{waypoint_count} "
+                        f"decision={waypoint_decision}/{args.max_decisions} "
+                        "phase=vlm_start",
+                        flush=True,
+                    )
+                phase_started = time.perf_counter()
                 baseline_output = vlm.infer(images, instruction)
+                timings["vlm"] = time.perf_counter() - phase_started
+
+                phase_started = time.perf_counter()
                 try:
                     parsed = parse_velocity_command(baseline_output)
                 except ActionParseError:
                     if controller is not None:
                         controller.stop_move()
                     raise
+                timings["parse"] = time.perf_counter() - phase_started
+
+                phase_started = time.perf_counter()
                 bounded = limits.apply(parsed)
                 total_decisions += 1
                 recorder.record(
@@ -335,6 +366,7 @@ def main(argv: list[str] | None = None) -> int:
                     waypoint_index=waypoint_index,
                     waypoint_count=waypoint_count,
                 )
+                timings["record"] = time.perf_counter() - phase_started
                 print(
                     f"waypoint={waypoint_index}/{waypoint_count} "
                     f"decision={waypoint_decision}/{args.max_decisions} "
@@ -345,19 +377,64 @@ def main(argv: list[str] | None = None) -> int:
                     flush=True,
                 )
                 if bounded.stop:
+                    phase_started = time.perf_counter()
                     if controller is not None:
                         controller.stop_move()
+                    timings["action"] = time.perf_counter() - phase_started
+                    timings["pause"] = 0.0
                     waypoint_stopped = True
                     print(
                         f"waypoint={waypoint_index}/{waypoint_count} complete",
                         flush=True,
                     )
+                    if args.print_timings:
+                        timings["processing"] = sum(
+                            timings[name]
+                            for name in ("health", "sample", "preprocess", "vlm", "parse", "record")
+                        )
+                        timings["total"] = time.perf_counter() - decision_started
+                        print(
+                            f"timing waypoint={waypoint_index}/{waypoint_count} "
+                            f"decision={waypoint_decision}/{args.max_decisions} "
+                            + " ".join(
+                                f"{name}={timings[name]:.3f}s"
+                                for name in (
+                                    "health", "sample", "preprocess", "vlm",
+                                    "parse", "record", "processing", "action",
+                                    "pause", "total",
+                                )
+                            ),
+                            flush=True,
+                        )
                     break
+                phase_started = time.perf_counter()
                 if executor is not None:
                     executor.execute(parsed)
+                timings["action"] = time.perf_counter() - phase_started
                 if interrupted:
                     break
+                phase_started = time.perf_counter()
                 time.sleep(args.decision_pause)
+                timings["pause"] = time.perf_counter() - phase_started
+                if args.print_timings:
+                    timings["processing"] = sum(
+                        timings[name]
+                        for name in ("health", "sample", "preprocess", "vlm", "parse", "record")
+                    )
+                    timings["total"] = time.perf_counter() - decision_started
+                    print(
+                        f"timing waypoint={waypoint_index}/{waypoint_count} "
+                        f"decision={waypoint_decision}/{args.max_decisions} "
+                        + " ".join(
+                            f"{name}={timings[name]:.3f}s"
+                            for name in (
+                                "health", "sample", "preprocess", "vlm",
+                                "parse", "record", "processing", "action",
+                                "pause", "total",
+                            )
+                        ),
+                        flush=True,
+                    )
 
             if interrupted:
                 break

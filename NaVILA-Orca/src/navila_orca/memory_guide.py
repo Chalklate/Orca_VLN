@@ -368,6 +368,20 @@ def _landmark_waypoints(
     raw_landmarks = landmark_map.get("landmarks", [])
     if not isinstance(raw_landmarks, list):
         raise ValueError("landmark map contains an invalid landmarks list")
+    raw_views = landmark_map.get("views", [])
+    if not isinstance(raw_views, list):
+        raise ValueError("landmark map contains an invalid views list")
+    reference_by_view: dict[int, str] = {}
+    for raw_view in raw_views:
+        if not isinstance(raw_view, Mapping):
+            continue
+        try:
+            view_index = int(raw_view.get("index"))
+        except (TypeError, ValueError):
+            continue
+        image_path = str(raw_view.get("image_path", "")).strip()
+        if image_path:
+            reference_by_view[view_index] = image_path
     candidates: list[dict[str, Any]] = []
     for index, raw in enumerate(raw_landmarks):
         if not isinstance(raw, Mapping):
@@ -389,11 +403,15 @@ def _landmark_waypoints(
                 "search_surface": bool(raw.get("search_surface", False)),
                 "view_index": view_index,
                 "confidence": float(raw.get("confidence", 0.0) or 0.0),
+                "reference_image": str(
+                    raw.get("reference_image") or reference_by_view.get(view_index, "")
+                ).strip(),
             }
         )
     if not candidates:
         return [], [], "no_landmarks"
 
+    display_name = _display_name(item_id, catalog)
     planner_name = "deterministic_scan_order"
     selected_ids: list[str] = []
     if llm_mode == "openai" and openai_router is not None:
@@ -412,9 +430,33 @@ def _landmark_waypoints(
     if selected_ids:
         ordered = [by_id[landmark_id] for landmark_id in selected_ids if landmark_id in by_id]
     else:
+        target_terms = {
+            term for term in _normalise(display_name).split() if len(term) >= 3
+        }
+
+        def relevance(candidate: Mapping[str, Any]) -> tuple[int, int]:
+            name_terms = set(_normalise(str(candidate["name"])).split())
+            all_terms = set(
+                _normalise(
+                    " ".join(
+                        (
+                            str(candidate["name"]),
+                            str(candidate["kind"]),
+                            str(candidate["description"]),
+                        )
+                    )
+                ).split()
+            )
+            return (
+                len(target_terms & name_terms),
+                len(target_terms & all_terms),
+            )
+
         ordered = sorted(
             candidates,
             key=lambda candidate: (
+                -relevance(candidate)[0],
+                -relevance(candidate)[1],
                 not candidate["search_surface"],
                 -candidate["confidence"],
                 candidate["view_index"],
@@ -422,17 +464,18 @@ def _landmark_waypoints(
             ),
         )
     selected = ordered[:max_waypoints]
-    display_name = _display_name(item_id, catalog)
     waypoints: list[str] = []
     steps: list[dict[str, Any]] = []
     for candidate in selected:
-        view_hint = f"scan view {candidate['view_index']}"
+        # Keep the NaVILA instruction short and grounded in the current camera.
+        # Scan metadata and descriptions belong in the seer/coordinator input,
+        # not in the reactive policy prompt.
         waypoints.append(
-            f"Navigate toward the visual landmark '{candidate['name']}' from {view_hint}. "
-            f"Use it as a visual arrival reference, stay in clear floor space, and "
-            f"stop at a safe viewing distance. Inspect accessible surfaces and the "
-            f"nearby floor around this landmark for the {display_name}. Stop after "
-            "inspecting this search location."
+            f"Find the {display_name}. Approach only the visible landmark "
+            f"'{candidate['name']}' through clear floor space in short increments. "
+            f"If the {display_name} is visible, output exactly stop. If the landmark "
+            "is close, cropped, or not visible, output exactly stop. Do not search "
+            "another location."
         )
         steps.append(
             {
@@ -443,6 +486,7 @@ def _landmark_waypoints(
                 "view_index": candidate["view_index"],
                 "search_surface": candidate["search_surface"],
                 "confidence": candidate["confidence"],
+                "reference_image": candidate["reference_image"],
                 "coverage": "visual_scan_landmark",
             }
         )
@@ -755,6 +799,7 @@ def plan_query(
         return plan
 
     assert parsed.intent == "find_item" and parsed.target is not None
+    plan["target_display_name"] = _display_name(parsed.target, catalog)
     observation = inventory.get("observations", {}).get(parsed.target)
     if observation is not None:
         effective_confidence, age_hours = observation_score(observation, now=now)

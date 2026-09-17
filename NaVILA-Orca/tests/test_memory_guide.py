@@ -149,3 +149,33 @@ def test_cli_remember_then_plan_routes_directly(tmp_path):
     assert load_inventory(inventory)["observations"]["glasses"]["location"] == (
         "the dining table"
     )
+
+
+def test_scan_waypoint_keeps_reference_metadata_out_of_navila_prompt(catalog):
+    plan = plan_query(
+        "Where is my bag?",
+        catalog=catalog,
+        inventory={"version": 1, "observations": {}},
+        landmark_map={
+            "version": 1,
+            "views": [{"index": 2, "image_path": "/scan/view_002.jpg"}],
+            "landmarks": [
+                {
+                    "id": "landmark_001",
+                    "name": "Large gray equipment case",
+                    "kind": "equipment_case",
+                    "description": "Large open gray hard case",
+                    "view_index": 2,
+                    "search_surface": True,
+                    "confidence": 0.98,
+                }
+            ],
+        },
+        max_landmark_waypoints=1,
+    )
+
+    assert "scan view" not in plan["waypoints"][0]
+    assert "Large gray equipment case" in plan["waypoints"][0]
+    assert "reference_image" not in plan["waypoints"][0]
+    assert plan["target_display_name"] == "bag"
+    assert plan["landmark_steps"][0]["reference_image"] == "/scan/view_002.jpg"

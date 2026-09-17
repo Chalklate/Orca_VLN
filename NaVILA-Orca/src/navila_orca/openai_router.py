@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import math
 import os
+from dataclasses import dataclass
 from typing import Any, Mapping, Sequence
 
 from .frames import encode_jpeg_base64
@@ -20,10 +22,41 @@ DEFAULT_MODEL_ID = "gpt-5.6-luna"
 SCHEMA_NAME = "memory_guide_route"
 LANDMARK_SCAN_SCHEMA_NAME = "memory_guide_landmark_scan"
 LANDMARK_RANKING_SCHEMA_NAME = "memory_guide_landmark_ranking"
+LANDMARK_SEER_SCHEMA_NAME = "memory_guide_landmark_seer"
 
 
 class OpenAIRouterError(ValueError):
     """Raised when the OpenAI router cannot produce a safe route decision."""
+
+
+@dataclass(frozen=True)
+class LandmarkSeerResult:
+    """Structured visual reacquisition result for one live camera image."""
+
+    target_visible: bool
+    confidence: float
+    relative_position: str
+    bearing_degrees: float
+    distance_state: str
+    safe_to_advance: bool
+    rationale: str
+
+
+@dataclass(frozen=True)
+class GoalSeerResult:
+    """Structured landmark-and-item verification for one live camera image."""
+
+    landmark_visible: bool
+    landmark_confidence: float
+    landmark_relative_position: str
+    landmark_bearing_degrees: float
+    landmark_distance_state: str
+    safe_to_advance: bool
+    item_visible: bool
+    item_confidence: float
+    item_relative_position: str
+    item_bearing_degrees: float
+    rationale: str
 
 
 class OpenAIQueryRouter:
@@ -154,20 +187,53 @@ class OpenAIQueryRouter:
     def _decode_structured_response(response: Any, *, purpose: str) -> Mapping[str, Any]:
         raw_text = getattr(response, "output_text", None)
         if not isinstance(raw_text, str) or not raw_text.strip():
+            status = getattr(response, "status", None)
+            incomplete = getattr(response, "incomplete_details", None)
+            refusal = getattr(response, "refusal", None)
+            diagnostics = " ".join(
+                part
+                for part in (
+                    f"status={status!r}" if status is not None else "",
+                    f"incomplete_details={incomplete!r}" if incomplete is not None else "",
+                    f"refusal={refusal!r}" if refusal is not None else "",
+                )
+                if part
+            )
             raise OpenAIRouterError(
                 f"OpenAI response did not contain structured output for {purpose}"
+                + (f" ({diagnostics})" if diagnostics else "")
             )
+        raw_text = raw_text.strip()
+        candidates = [raw_text]
+        if raw_text.startswith("```"):
+            fenced_lines = raw_text.splitlines()
+            if fenced_lines and fenced_lines[0].lstrip().startswith("```"):
+                fenced_lines = fenced_lines[1:]
+            if fenced_lines and fenced_lines[-1].strip().startswith("```"):
+                fenced_lines = fenced_lines[:-1]
+            candidates.append("\n".join(fenced_lines).strip())
+        object_start = raw_text.find("{")
+        object_end = raw_text.rfind("}")
+        if object_start >= 0 and object_end > object_start:
+            candidates.append(raw_text[object_start : object_end + 1])
+        for candidate in candidates:
+            try:
+                payload = json.loads(candidate)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, Mapping):
+                return payload
         try:
-            payload = json.loads(raw_text)
+            json.loads(raw_text)
         except json.JSONDecodeError as exc:
+            preview = raw_text[:240].replace("\n", "\\n")
             raise OpenAIRouterError(
-                f"OpenAI structured output for {purpose} was not valid JSON"
+                f"OpenAI structured output for {purpose} was not valid JSON; "
+                f"preview={preview!r}"
             ) from exc
-        if not isinstance(payload, Mapping):
-            raise OpenAIRouterError(
-                f"OpenAI structured output for {purpose} was not an object"
-            )
-        return payload
+        raise OpenAIRouterError(
+            f"OpenAI structured output for {purpose} was not an object"
+        )
 
     def rank_landmarks(
         self,
@@ -254,6 +320,377 @@ class OpenAIQueryRouter:
                 "OpenAI landmark ranking returned no valid scanned landmark IDs"
             )
         return selected[:max_landmarks]
+
+    def see_landmark(
+        self,
+        *,
+        target_name: str,
+        target_description: str,
+        reference_image: Any,
+        live_image: Any,
+    ) -> LandmarkSeerResult:
+        """Compare a scan reference with the current robot camera image.
+
+        This is deliberately a perception query, not a motion planner.  The
+        caller remains responsible for converting a positive result into a
+        bounded action and for stopping when the target is not visible.
+        """
+
+        target_name = str(target_name).strip()
+        target_description = str(target_description).strip()
+        if not target_name:
+            raise OpenAIRouterError("landmark seer target name must not be empty")
+        if reference_image is None or live_image is None:
+            raise OpenAIRouterError("landmark seer requires reference and live images")
+
+        content: list[dict[str, Any]] = [
+            {
+                "type": "input_text",
+                "text": (
+                    "Compare the reference image of a stable indoor landmark with "
+                    "the current robot-camera image. Decide only whether the same "
+                    "landmark is visibly present in the current image. Do not infer "
+                    "that it is present from the text description. If it is absent, "
+                    "set target_visible=false, relative_position=not_visible, and "
+                    "bearing_degrees=0. If it is visible, estimate its horizontal "
+                    "bearing in the camera image: negative means left, positive means "
+                    "right, and zero means centered. Return concise strict JSON."
+                ),
+            },
+            {
+                "type": "input_text",
+                "text": (
+                    f"Landmark name: {target_name}\n"
+                    f"Landmark description: {target_description or 'none'}\n"
+                    "Image A is the scan reference. Image B is the live robot image."
+                ),
+            },
+            {
+                "type": "input_text",
+                "text": "Image A: scan reference",
+            },
+            {
+                "type": "input_image",
+                "image_url": "data:image/jpeg;base64," + encode_jpeg_base64(reference_image),
+            },
+            {
+                "type": "input_text",
+                "text": "Image B: current live camera image",
+            },
+            {
+                "type": "input_image",
+                "image_url": "data:image/jpeg;base64," + encode_jpeg_base64(live_image),
+            },
+        ]
+        schema = {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "target_visible": {"type": "boolean"},
+                "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                "relative_position": {
+                    "type": "string",
+                    "enum": ["left", "center", "right", "not_visible", "unknown"],
+                },
+                "bearing_degrees": {"type": "number", "minimum": -90, "maximum": 90},
+                "distance_state": {
+                    "type": "string",
+                    "enum": ["far", "approach", "near", "too_close", "unknown"],
+                },
+                "safe_to_advance": {"type": "boolean"},
+                "rationale": {"type": "string", "maxLength": 160},
+            },
+            "required": [
+                "target_visible",
+                "confidence",
+                "relative_position",
+                "bearing_degrees",
+                "distance_state",
+                "safe_to_advance",
+                "rationale",
+            ],
+        }
+        request = {
+            "model": self.model_id,
+            "instructions": (
+                "You are a conservative visual landmark verifier for a mobile robot. "
+                "Use only evidence in the two supplied images. A partial or ambiguous "
+                "match is not enough for target_visible=true. Never output motor "
+                "commands, poses, or invented objects. Estimate qualitative distance "
+                "from framing only: far, approach, near, too_close, or unknown. Set "
+                "safe_to_advance=false when the landmark is near/too_close, fills the "
+                "close foreground, is substantially cropped, or distance is unclear. "
+                "A visible landmark is not automatically safe to approach. Return "
+                "strict JSON matching the supplied schema."
+            ),
+            "input": [{"role": "user", "content": content}],
+            # Responses max_output_tokens includes reasoning tokens.  Vision
+            # calls can otherwise be cut off before the small JSON object is
+            # emitted, leaving output_text with an unterminated prefix.
+            "max_output_tokens": 1024,
+            "store": False,
+            "text": {
+                "format": {
+                    "type": "json_schema",
+                    "name": LANDMARK_SEER_SCHEMA_NAME,
+                    "strict": True,
+                    "schema": schema,
+                }
+            },
+        }
+        try:
+            response = self.client.responses.create(**request)
+        except Exception as exc:
+            raise OpenAIRouterError(
+                f"OpenAI {self.model_id} landmark seer failed: {exc}"
+            ) from exc
+        payload = self._decode_structured_response(response, purpose="landmark seer")
+        try:
+            target_visible = payload["target_visible"]
+            confidence = float(payload["confidence"])
+            relative_position = str(payload["relative_position"])
+            bearing_degrees = float(payload["bearing_degrees"])
+            distance_state = str(payload["distance_state"])
+            safe_to_advance = payload["safe_to_advance"]
+            rationale = str(payload["rationale"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise OpenAIRouterError(
+                "OpenAI landmark seer returned invalid structured fields"
+            ) from exc
+        if not isinstance(target_visible, bool):
+            raise OpenAIRouterError("OpenAI landmark seer returned invalid visibility")
+        if not math.isfinite(confidence) or not 0.0 <= confidence <= 1.0:
+            raise OpenAIRouterError("OpenAI landmark seer returned invalid confidence")
+        if relative_position not in {"left", "center", "right", "not_visible", "unknown"}:
+            raise OpenAIRouterError("OpenAI landmark seer returned invalid position")
+        if not math.isfinite(bearing_degrees) or not -90.0 <= bearing_degrees <= 90.0:
+            raise OpenAIRouterError("OpenAI landmark seer returned invalid bearing")
+        if distance_state not in {"far", "approach", "near", "too_close", "unknown"}:
+            raise OpenAIRouterError("OpenAI landmark seer returned invalid distance")
+        if not isinstance(safe_to_advance, bool):
+            raise OpenAIRouterError("OpenAI landmark seer returned invalid advance flag")
+        if not target_visible:
+            relative_position = "not_visible"
+            bearing_degrees = 0.0
+            distance_state = "unknown"
+            safe_to_advance = False
+        if distance_state in {"near", "too_close", "unknown"}:
+            safe_to_advance = False
+        return LandmarkSeerResult(
+            target_visible=target_visible,
+            confidence=confidence,
+            relative_position=relative_position,
+            bearing_degrees=bearing_degrees,
+            distance_state=distance_state,
+            safe_to_advance=safe_to_advance,
+            rationale=rationale.strip(),
+        )
+
+    def see_goal(
+        self,
+        *,
+        item_name: str,
+        item_description: str,
+        landmark_name: str,
+        landmark_description: str,
+        reference_image: Any,
+        live_image: Any,
+    ) -> GoalSeerResult:
+        """Verify the current landmark and requested item in the live image.
+
+        The landmark reference is used only to reacquire the search location.
+        The item must be visible in the live image before this result can be
+        treated as a successful find.  This is perception and state estimation;
+        it deliberately does not return motor commands.
+        """
+
+        item_name = str(item_name).strip()
+        item_description = str(item_description).strip()
+        landmark_name = str(landmark_name).strip()
+        landmark_description = str(landmark_description).strip()
+        if not item_name:
+            raise OpenAIRouterError("goal seer item name must not be empty")
+        if not landmark_name:
+            raise OpenAIRouterError("goal seer landmark name must not be empty")
+        if reference_image is None or live_image is None:
+            raise OpenAIRouterError("goal seer requires reference and live images")
+
+        content: list[dict[str, Any]] = [
+            {
+                "type": "input_text",
+                "text": (
+                    "Compare the stable-landmark reference image with the current "
+                    "robot-camera image. Verify two things independently: whether "
+                    "the same landmark is visible, and whether the requested item "
+                    "is clearly visible in the live image. The item may be absent "
+                    "from the reference image; never infer that the item is present "
+                    "from the text or reference. Only set item_visible=true when "
+                    "the item is visually identifiable in the live image, preferably "
+                    "on an accessible surface or nearby floor in this search area. "
+                    "Estimate landmark bearing with negative=left and positive=right. "
+                    "Estimate landmark distance from framing only. Set safe_to_advance "
+                    "false when the landmark is near, too close, cropped, or its "
+                    "distance is unclear. Return concise strict JSON."
+                ),
+            },
+            {
+                "type": "input_text",
+                "text": (
+                    f"Requested item: {item_name}\n"
+                    f"Item description: {item_description or 'none'}\n"
+                    f"Landmark name: {landmark_name}\n"
+                    f"Landmark description: {landmark_description or 'none'}\n"
+                    "Image A is the scan reference for the landmark. Image B is the "
+                    "current live robot image."
+                ),
+            },
+            {"type": "input_text", "text": "Image A: landmark scan reference"},
+            {
+                "type": "input_image",
+                "image_url": "data:image/jpeg;base64," + encode_jpeg_base64(reference_image),
+            },
+            {"type": "input_text", "text": "Image B: current live camera image"},
+            {
+                "type": "input_image",
+                "image_url": "data:image/jpeg;base64," + encode_jpeg_base64(live_image),
+            },
+        ]
+        schema = {
+            "type": "object",
+            "additionalProperties": False,
+            "properties": {
+                "landmark_visible": {"type": "boolean"},
+                "landmark_confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                "landmark_relative_position": {
+                    "type": "string",
+                    "enum": ["left", "center", "right", "not_visible", "unknown"],
+                },
+                "landmark_bearing_degrees": {
+                    "type": "number",
+                    "minimum": -90,
+                    "maximum": 90,
+                },
+                "landmark_distance_state": {
+                    "type": "string",
+                    "enum": ["far", "approach", "near", "too_close", "unknown"],
+                },
+                "safe_to_advance": {"type": "boolean"},
+                "item_visible": {"type": "boolean"},
+                "item_confidence": {"type": "number", "minimum": 0, "maximum": 1},
+                "item_relative_position": {
+                    "type": "string",
+                    "enum": ["left", "center", "right", "not_visible", "unknown"],
+                },
+                "item_bearing_degrees": {
+                    "type": "number",
+                    "minimum": -90,
+                    "maximum": 90,
+                },
+                "rationale": {"type": "string", "maxLength": 180},
+            },
+            "required": [
+                "landmark_visible",
+                "landmark_confidence",
+                "landmark_relative_position",
+                "landmark_bearing_degrees",
+                "landmark_distance_state",
+                "safe_to_advance",
+                "item_visible",
+                "item_confidence",
+                "item_relative_position",
+                "item_bearing_degrees",
+                "rationale",
+            ],
+        }
+        request = {
+            "model": self.model_id,
+            "instructions": (
+                "You are the goal verifier for a mobile indoor robot. Use only the "
+                "two supplied images. Never output motor commands, coordinates, or "
+                "invented objects. A visible landmark is not automatically safe to "
+                "approach, and an item is not found merely because the request names "
+                "it. Return strict JSON matching the supplied schema."
+            ),
+            "input": [{"role": "user", "content": content}],
+            "max_output_tokens": 1536,
+            "store": False,
+            "text": {
+                "format": {
+                    "type": "json_schema",
+                    "name": "memory_guide_goal_seer",
+                    "strict": True,
+                    "schema": schema,
+                }
+            },
+        }
+        try:
+            response = self.client.responses.create(**request)
+        except Exception as exc:
+            raise OpenAIRouterError(
+                f"OpenAI {self.model_id} goal seer failed: {exc}"
+            ) from exc
+        payload = self._decode_structured_response(response, purpose="goal seer")
+        try:
+            landmark_visible = payload["landmark_visible"]
+            landmark_confidence = float(payload["landmark_confidence"])
+            landmark_relative_position = str(payload["landmark_relative_position"])
+            landmark_bearing_degrees = float(payload["landmark_bearing_degrees"])
+            landmark_distance_state = str(payload["landmark_distance_state"])
+            safe_to_advance = payload["safe_to_advance"]
+            item_visible = payload["item_visible"]
+            item_confidence = float(payload["item_confidence"])
+            item_relative_position = str(payload["item_relative_position"])
+            item_bearing_degrees = float(payload["item_bearing_degrees"])
+            rationale = str(payload["rationale"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise OpenAIRouterError(
+                "OpenAI goal seer returned invalid structured fields"
+            ) from exc
+
+        if not isinstance(landmark_visible, bool) or not isinstance(item_visible, bool):
+            raise OpenAIRouterError("OpenAI goal seer returned invalid visibility")
+        for value, label in (
+            (landmark_confidence, "landmark confidence"),
+            (item_confidence, "item confidence"),
+        ):
+            if not math.isfinite(value) or not 0.0 <= value <= 1.0:
+                raise OpenAIRouterError(f"OpenAI goal seer returned invalid {label}")
+        valid_positions = {"left", "center", "right", "not_visible", "unknown"}
+        if landmark_relative_position not in valid_positions:
+            raise OpenAIRouterError("OpenAI goal seer returned invalid landmark position")
+        if item_relative_position not in valid_positions:
+            raise OpenAIRouterError("OpenAI goal seer returned invalid item position")
+        if not math.isfinite(landmark_bearing_degrees) or not -90.0 <= landmark_bearing_degrees <= 90.0:
+            raise OpenAIRouterError("OpenAI goal seer returned invalid landmark bearing")
+        if not math.isfinite(item_bearing_degrees) or not -90.0 <= item_bearing_degrees <= 90.0:
+            raise OpenAIRouterError("OpenAI goal seer returned invalid item bearing")
+        if landmark_distance_state not in {"far", "approach", "near", "too_close", "unknown"}:
+            raise OpenAIRouterError("OpenAI goal seer returned invalid landmark distance")
+        if not isinstance(safe_to_advance, bool):
+            raise OpenAIRouterError("OpenAI goal seer returned invalid advance flag")
+        if not landmark_visible:
+            landmark_relative_position = "not_visible"
+            landmark_bearing_degrees = 0.0
+            landmark_distance_state = "unknown"
+            safe_to_advance = False
+        if not item_visible:
+            item_relative_position = "not_visible"
+            item_bearing_degrees = 0.0
+        if landmark_distance_state in {"near", "too_close", "unknown"}:
+            safe_to_advance = False
+        return GoalSeerResult(
+            landmark_visible=landmark_visible,
+            landmark_confidence=landmark_confidence,
+            landmark_relative_position=landmark_relative_position,
+            landmark_bearing_degrees=landmark_bearing_degrees,
+            landmark_distance_state=landmark_distance_state,
+            safe_to_advance=safe_to_advance,
+            item_visible=item_visible,
+            item_confidence=item_confidence,
+            item_relative_position=item_relative_position,
+            item_bearing_degrees=item_bearing_degrees,
+            rationale=rationale.strip(),
+        )
 
     def describe_landmarks(
         self,

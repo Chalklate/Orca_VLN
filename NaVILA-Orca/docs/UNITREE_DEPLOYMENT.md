@@ -263,8 +263,10 @@ The lightweight client includes the deployable part of the “Where is my bread?
 flow. A typed query is routed locally, expanded into one waypoint per search
 location, and executed sequentially. For an unknown item such as bread, the
 default catalog produces four waypoints. The VLM receives explicit
-`Waypoint 1 of 4`, `Waypoint 2 of 4`, and so on, and the next waypoint is not
-started until the current one returns a `stop` action.
+short approach instructions. Without the seer, the next waypoint is not
+started until the current one returns a `stop` action. With `--landmark-seer`,
+the goal verifier can instead end the waypoint after a bounded inspection, and
+it ends the whole mission when the requested item is confirmed.
 
 Run it from the Go2 SSH terminal after validating the single-waypoint path:
 
@@ -306,16 +308,20 @@ PYTHONPATH=src python3 -m navila_orca.memory_guide \
   remember --item bread --location "the kitchen counter" --confidence 0.9
 ```
 
-This physical MVP does not yet automatically confirm an item or build a real
-SLAM map. A VLM `stop` marks a completed inspection waypoint; it is not by
-itself an object-detection result. Automatic inventory updates and physical
-map routing remain separate additions.
+Without `--landmark-seer`, this physical MVP does not automatically confirm an
+item: a VLM `stop` only marks a completed inspection waypoint. With the seer
+enabled, Luna verifies the requested item in the live image, calls the direct
+Go2 `StopMove()` path on confirmation, and terminates the search. If the
+landmark is reached but the item is not visible, it stops and performs a
+bounded in-place inspection sweep before moving to the next candidate.
+Automatic inventory updates and physical map routing remain separate additions.
 
 ## 8. Luna query parsing and a quick site scan
 
 The physical Memory Guide can use OpenAI for intent/target parsing and for
 ranking site-specific visual landmarks. Keep the API key out of scripts and
-Git. On the Go2, create a private environment file once:
+Git. Create a private environment file on whichever machine runs the
+Memory-Guide wrapper (the laptop in the laptop-to-Go2 deployment):
 
 ```bash
 cat > "$HOME/navila-secrets.env" <<'EOF'
@@ -348,6 +354,20 @@ a table, door, lectern, aisle, or stage. It is useful for generating plausible
 search locations in an unfamiliar office or auditorium, but it cannot
 guarantee that the robot can safely reach each reference.
 
+If the scan was run on the Go2, copy the resulting JSON to the laptop that
+will run the query wrapper. The wrapper automatically uses this standard path:
+
+```bash
+mkdir -p outputs/memory_guide
+scp unitree@192.168.1.119:/home/unitree/Desktop/dethread/unitree-navila-client/outputs/memory_guide/latest_landmark_map.json \
+  outputs/memory_guide/latest_landmark_map.json
+```
+
+The file must be the JSON file written by the scan, not a terminal log that
+also contains the JSON. Set `NAVILA_LANDMARK_MAP` or pass `--landmark-map` when
+using a different path. If the standard map is absent, the wrapper fails
+closed instead of silently using the old dining-table/entryway catalog.
+
 Then route a query through Luna and use the scan map to choose up to six search
 locations:
 
@@ -356,13 +376,13 @@ source "$HOME/navila-secrets.env"
 ./scripts/run_unitree_memory_guide.sh \
   --query "Where is my bag?" \
   --robot-model go2 \
-  --network-interface eth10 \
+  --network-interface <laptop-ethernet-interface> \
   --vlm-host <model-pc-tailscale-ip> \
   --vlm-port 54321 \
   --llm-mode openai \
   --openai-model-id gpt-5.6-luna \
-  --landmark-map outputs/memory_guide/latest_landmark_map.json \
   --max-landmark-waypoints 6 \
+  --landmark-seer \
   --execute-actions \
   --max-decisions 8 \
   --max-forward-mps 0.20 \
@@ -372,8 +392,21 @@ source "$HOME/navila-secrets.env"
   --scene-id auditorium
 ```
 
-Luna only returns structured intent, target, and landmark IDs. It does not
-return robot poses or motor commands. NaVILA receives the generated textual
-waypoints and must visually approach and stop at each one. If the Go2 has no
-Internet route to the OpenAI API, use a reachable OpenAI-compatible
-`--openai-base-url` or keep `--llm-mode deterministic`.
+Luna first returns structured intent, target, and landmark IDs. With
+`--landmark-seer`, the same OpenAI client then compares each selected
+landmark's scan reference image with the live Go2 image and also checks for the
+requested item. If the landmark is not visible, the client rotates in place in
+bounded increments and checks again; forward motion is not permitted during
+this acquisition phase. NaVILA is called only for short approach suggestions.
+The goal seer is checked before approach, periodically during approach, and
+throughout the final in-place inspection. A confirmed item produces a direct
+`StopMove()` and `goal-found ...; search complete`; NaVILA does not need to
+emit the textual `stop` action for the mission to finish. The seer is
+intentionally opt-in because each check uploads images and can trigger physical
+in-place turns. If the Go2 has no Internet route to the OpenAI API, use a
+reachable OpenAI-compatible `--openai-base-url` or omit `--landmark-seer`.
+
+The seer needs the scan reference JPEGs as well as the JSON map. Run the scan
+on the same laptop that will run the search, or copy the scan image directory
+and update the paths in the map before starting the mission. A JSON-only copy
+is sufficient for landmark ranking but not for visual reacquisition.

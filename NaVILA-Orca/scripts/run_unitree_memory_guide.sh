@@ -13,7 +13,7 @@ CATALOG="${NAVILA_MEMORY_CATALOG:-${PROJECT_ROOT}/assets/memory_guide_catalog.js
 INVENTORY="${NAVILA_MEMORY_INVENTORY:-${PROJECT_ROOT}/outputs/memory_guide/inventory.json}"
 PLAN_OUTPUT="${NAVILA_MEMORY_PLAN:-${PROJECT_ROOT}/outputs/memory_guide/latest_plan.json}"
 WAYPOINT_OUTPUT="${NAVILA_MEMORY_WAYPOINTS:-${PROJECT_ROOT}/outputs/memory_guide/latest_waypoints.txt}"
-LANDMARK_MAP="${NAVILA_LANDMARK_MAP:-}"
+LANDMARK_MAP="${NAVILA_LANDMARK_MAP:-${PROJECT_ROOT}/outputs/memory_guide/latest_landmark_map.json}"
 LLM_MODE="${NAVILA_MEMORY_LLM_MODE:-deterministic}"
 OPENAI_MODEL_ID="${NAVILA_OPENAI_MODEL:-gpt-5.6-luna}"
 OPENAI_BASE_URL="${NAVILA_OPENAI_BASE_URL:-}"
@@ -41,7 +41,7 @@ Memory options:
   --llm-mode MODE           deterministic or openai (default: ${LLM_MODE})
   --openai-model-id ID      OpenAI model ID (default: ${OPENAI_MODEL_ID})
   --openai-base-url URL     Optional OpenAI-compatible API base URL
-  --landmark-map PATH       Visual scan map for site-specific search waypoints
+  --landmark-map PATH       Visual scan map (default: ${LANDMARK_MAP})
   --max-landmark-waypoints N  Maximum scan landmarks to inspect (default: ${MAX_LANDMARK_WAYPOINTS})
   --plan-only               Generate and print the plan without moving
 
@@ -186,8 +186,10 @@ CATALOG="$(resolve_project_path "${CATALOG}")"
 INVENTORY="$(resolve_project_path "${INVENTORY}")"
 PLAN_OUTPUT="$(resolve_project_path "${PLAN_OUTPUT}")"
 WAYPOINT_OUTPUT="$(resolve_project_path "${WAYPOINT_OUTPUT}")"
-if [[ -n "${LANDMARK_MAP}" ]]; then
-  LANDMARK_MAP="$(resolve_project_path "${LANDMARK_MAP}")"
+LANDMARK_MAP="$(resolve_project_path "${LANDMARK_MAP}")"
+if [[ ! -f "${LANDMARK_MAP}" ]]; then
+  echo "landmark map does not exist: ${LANDMARK_MAP}; run the 360 scan first or set NAVILA_LANDMARK_MAP" >&2
+  exit 2
 fi
 
 ROUTER_ARGS=(--llm-mode "${LLM_MODE}")
@@ -198,9 +200,7 @@ if [[ "${LLM_MODE}" == openai ]]; then
   fi
 fi
 LANDMARK_ARGS=(--max-landmark-waypoints "${MAX_LANDMARK_WAYPOINTS}")
-if [[ -n "${LANDMARK_MAP}" ]]; then
-  LANDMARK_ARGS+=(--landmark-map "${LANDMARK_MAP}")
-fi
+LANDMARK_ARGS+=(--landmark-map "${LANDMARK_MAP}")
 
 "${UNITREE_PYTHON}" -m navila_orca.memory_guide \
   --catalog "${CATALOG}" \
@@ -221,4 +221,5 @@ fi
 exec "${PROJECT_ROOT}/scripts/run_unitree_navila.sh" \
   --waypoint-instruction-file "${WAYPOINT_OUTPUT}" \
   --max-decisions "${NAVILA_WAYPOINT_MAX_DECISIONS:-8}" \
+  --landmark-plan "${PLAN_OUTPUT}" \
   "${RUN_ARGS[@]}"

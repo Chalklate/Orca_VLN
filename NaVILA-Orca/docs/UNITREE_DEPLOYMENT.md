@@ -392,6 +392,33 @@ source "$HOME/navila-secrets.env"
   --scene-id auditorium
 ```
 
+The Unitree Memory Guide launcher also accepts the existing eight-second voice
+front end. It records 16 kHz mono audio from the machine running the launcher,
+transcribes it, prints the recognized query, and sends that text through the
+same planner. For the Modal ASR service, use the HTTP backend explicitly:
+
+```bash
+source "$HOME/navila-secrets.env"
+export NAVILA_VOICE_BACKEND=http
+export NAVILA_VOICE_ENDPOINT=https://<modal-host>/transcribe/wav
+./scripts/run_unitree_memory_guide.sh \
+  --voice \
+  --llm-mode openai \
+  --openai-model-id gpt-5.6-luna \
+  --robot-model go2 \
+  --network-interface <laptop-ethernet-interface> \
+  --vlm-host <model-pc-tailscale-ip> \
+  --vlm-port 54321 \
+  --landmark-seer \
+  --execute-actions
+```
+
+`--voice` defaults to eight seconds and uses the default ALSA device. Adjust
+that with `--voice-duration` or `--voice-device`; `--voice-file PATH` can be
+used to test a saved WAV without recording. The local `firered` backend remains
+available when `NAVILA_VOICE_PYTHON`, `NAVILA_FIRERED_ROOT`, and
+`NAVILA_FIRERED_MODEL` are configured.
+
 Luna first returns structured intent, target, and landmark IDs. With
 `--landmark-seer`, the same OpenAI client then compares each selected
 landmark's scan reference image with the live Go2 image and also checks for the

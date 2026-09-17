@@ -9,6 +9,15 @@ if [[ -n "${UNITREE_SDK2_ROOT:-}" ]]; then
 fi
 
 QUERY=""
+VOICE_REQUESTED=false
+VOICE_FILE=""
+VOICE_DURATION="${NAVILA_VOICE_DURATION:-8}"
+VOICE_DEVICE="${NAVILA_VOICE_DEVICE:-default}"
+VOICE_BACKEND="${NAVILA_VOICE_BACKEND:-firered}"
+VOICE_ENDPOINT="${NAVILA_VOICE_ENDPOINT:-}"
+VOICE_TRANSLATE="${NAVILA_VOICE_TRANSLATE_TO_ENGLISH:-false}"
+VOICE_GOOGLE_PROJECT="${NAVILA_GOOGLE_CLOUD_PROJECT:-${GOOGLE_CLOUD_PROJECT:-}}"
+VOICE_CPU=false
 CATALOG="${NAVILA_MEMORY_CATALOG:-${PROJECT_ROOT}/assets/memory_guide_catalog.json}"
 INVENTORY="${NAVILA_MEMORY_INVENTORY:-${PROJECT_ROOT}/outputs/memory_guide/inventory.json}"
 PLAN_OUTPUT="${NAVILA_MEMORY_PLAN:-${PROJECT_ROOT}/outputs/memory_guide/latest_plan.json}"
@@ -30,10 +39,18 @@ resolve_project_path() {
 
 usage() {
   cat <<EOF
-Usage: $0 --query "Where is my bread?" [memory options] [Unitree options]
+Usage: $0 (--query "Where is my bread?" | --voice | --voice-file PATH) [memory options] [Unitree options]
 
 Memory options:
   --query TEXT              Typed resident request
+  --voice                   Record an 8-second query from the default ALSA microphone
+  --voice-file PATH         Transcribe an existing WAV file as the query
+  --voice-duration SECONDS  Recording length for --voice (default: ${VOICE_DURATION})
+  --voice-device DEVICE     ALSA capture device for --voice (default: ${VOICE_DEVICE})
+  --voice-backend NAME      firered (local) or http (default: ${VOICE_BACKEND})
+  --voice-endpoint URL      HTTP transcription endpoint for --voice-backend http
+  --voice-translate         Translate Han-character transcripts to English via Google Cloud
+  --voice-cpu               Run local FireRed inference on CPU
   --catalog PATH            Item/place catalog JSON
   --inventory PATH          Persistent item-memory JSON
   --plan-output PATH        Structured plan JSON
@@ -66,6 +83,65 @@ while (($#)); do
       ;;
     --query=*)
       QUERY="${1#*=}"
+      shift
+      ;;
+    --voice)
+      VOICE_REQUESTED=true
+      shift
+      ;;
+    --voice-file)
+      [[ $# -ge 2 ]] || { echo "--voice-file requires a value" >&2; exit 2; }
+      VOICE_REQUESTED=true
+      VOICE_FILE="$2"
+      shift 2
+      ;;
+    --voice-file=*)
+      VOICE_REQUESTED=true
+      VOICE_FILE="${1#*=}"
+      shift
+      ;;
+    --voice-duration)
+      [[ $# -ge 2 ]] || { echo "--voice-duration requires a value" >&2; exit 2; }
+      VOICE_DURATION="$2"
+      shift 2
+      ;;
+    --voice-duration=*)
+      VOICE_DURATION="${1#*=}"
+      shift
+      ;;
+    --voice-device)
+      [[ $# -ge 2 ]] || { echo "--voice-device requires a value" >&2; exit 2; }
+      VOICE_DEVICE="$2"
+      shift 2
+      ;;
+    --voice-device=*)
+      VOICE_DEVICE="${1#*=}"
+      shift
+      ;;
+    --voice-backend)
+      [[ $# -ge 2 ]] || { echo "--voice-backend requires a value" >&2; exit 2; }
+      VOICE_BACKEND="$2"
+      shift 2
+      ;;
+    --voice-backend=*)
+      VOICE_BACKEND="${1#*=}"
+      shift
+      ;;
+    --voice-endpoint)
+      [[ $# -ge 2 ]] || { echo "--voice-endpoint requires a value" >&2; exit 2; }
+      VOICE_ENDPOINT="$2"
+      shift 2
+      ;;
+    --voice-endpoint=*)
+      VOICE_ENDPOINT="${1#*=}"
+      shift
+      ;;
+    --voice-translate)
+      VOICE_TRANSLATE=true
+      shift
+      ;;
+    --voice-cpu)
+      VOICE_CPU=true
       shift
       ;;
     --catalog)
@@ -163,6 +239,82 @@ while (($#)); do
       ;;
   esac
 done
+
+if [[ "${VOICE_REQUESTED}" == true && -n "${QUERY}" ]]; then
+  echo "Choose exactly one of --query, --voice, or --voice-file." >&2
+  exit 2
+fi
+
+if [[ "${VOICE_REQUESTED}" == true ]]; then
+  if [[ -n "${VOICE_FILE}" ]]; then
+    VOICE_AUDIO="${VOICE_FILE}"
+    [[ -f "${VOICE_AUDIO}" ]] || {
+      echo "Voice audio file does not exist: ${VOICE_AUDIO}" >&2
+      exit 2
+    }
+  else
+    [[ "${VOICE_DURATION}" =~ ^[1-9][0-9]*$ ]] || {
+      echo "--voice-duration must be a positive integer number of seconds" >&2
+      exit 2
+    }
+    command -v arecord >/dev/null 2>&1 || {
+      echo "--voice requires arecord; install ALSA utilities or use --voice-file" >&2
+      exit 2
+    }
+    VOICE_TEMP="$(mktemp --suffix=.wav "${TMPDIR:-/tmp}/navila-voice-query.XXXXXX")"
+    trap 'rm -f "${VOICE_TEMP}"' EXIT
+    echo "Recording ${VOICE_DURATION}s from ALSA device ${VOICE_DEVICE}..." >&2
+    arecord -q \
+      --device "${VOICE_DEVICE}" \
+      --format S16_LE \
+      --rate 16000 \
+      --channels 1 \
+      --duration "${VOICE_DURATION}" \
+      "${VOICE_TEMP}"
+    VOICE_AUDIO="${VOICE_TEMP}"
+  fi
+
+  case "${VOICE_BACKEND}" in
+    firered|http) ;;
+    *)
+      echo "--voice-backend must be firered or http" >&2
+      exit 2
+      ;;
+  esac
+  VOICE_PYTHON="${NAVILA_VOICE_PYTHON:-${UNITREE_PYTHON}}"
+  if [[ "${VOICE_PYTHON}" != */* ]]; then
+    VOICE_PYTHON="$(command -v "${VOICE_PYTHON}" || true)"
+  fi
+  [[ -n "${VOICE_PYTHON}" && -x "${VOICE_PYTHON}" ]] || {
+    echo "Voice Python does not exist or is not executable: ${VOICE_PYTHON}" >&2
+    echo "Set NAVILA_VOICE_PYTHON to the Python environment used by voice_query." >&2
+    exit 2
+  }
+  VOICE_ARGS=(
+    -m navila_orca.voice_query
+    --audio-file "${VOICE_AUDIO}"
+    --backend "${VOICE_BACKEND}"
+  )
+  if [[ -n "${VOICE_ENDPOINT}" ]]; then
+    VOICE_ARGS+=(--endpoint "${VOICE_ENDPOINT}")
+  fi
+  if [[ "${VOICE_CPU}" == true ]]; then
+    VOICE_ARGS+=(--cpu)
+  fi
+  if [[ "${VOICE_TRANSLATE}" == true ]]; then
+    VOICE_ARGS+=(--translate-to-english)
+    if [[ -n "${VOICE_GOOGLE_PROJECT}" ]]; then
+      VOICE_ARGS+=(--google-project "${VOICE_GOOGLE_PROJECT}")
+    fi
+  fi
+  QUERY="$("${VOICE_PYTHON}" "${VOICE_ARGS[@]}")"
+  QUERY="${QUERY//$'\n'/ }"
+  [[ -n "${QUERY//[[:space:]]/}" ]] || {
+    echo "Voice recognition returned an empty query." >&2
+    exit 2
+  }
+  echo "Voice query: ${QUERY}" >&2
+fi
 
 if [[ -z "${QUERY}" ]]; then
   echo "--query is required" >&2

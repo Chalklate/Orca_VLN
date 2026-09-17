@@ -56,6 +56,9 @@ class GoalSeerResult:
     item_confidence: float
     item_relative_position: str
     item_bearing_degrees: float
+    item_distance_state: str
+    item_accessible: bool
+    item_safe_to_advance: bool
     rationale: str
 
 
@@ -527,6 +530,11 @@ class OpenAIQueryRouter:
                     "from the text or reference. Only set item_visible=true when "
                     "the item is visually identifiable in the live image, preferably "
                     "on an accessible surface or nearby floor in this search area. "
+                    "Estimate item distance from framing as far, approach, near, or "
+                    "unknown. Set item_accessible=true only when it is on an accessible "
+                    "surface or nearby floor and not blocked or hidden. Set "
+                    "item_safe_to_advance=true only when approaching it through visible "
+                    "floor space is reasonable; otherwise set it false. "
                     "Estimate landmark bearing with negative=left and positive=right. "
                     "Estimate landmark distance from framing only. Set safe_to_advance "
                     "false when the landmark is near, too close, cropped, or its "
@@ -586,6 +594,12 @@ class OpenAIQueryRouter:
                     "minimum": -90,
                     "maximum": 90,
                 },
+                "item_distance_state": {
+                    "type": "string",
+                    "enum": ["far", "approach", "near", "unknown"],
+                },
+                "item_accessible": {"type": "boolean"},
+                "item_safe_to_advance": {"type": "boolean"},
                 "rationale": {"type": "string", "maxLength": 180},
             },
             "required": [
@@ -599,6 +613,9 @@ class OpenAIQueryRouter:
                 "item_confidence",
                 "item_relative_position",
                 "item_bearing_degrees",
+                "item_distance_state",
+                "item_accessible",
+                "item_safe_to_advance",
                 "rationale",
             ],
         }
@@ -641,6 +658,9 @@ class OpenAIQueryRouter:
             item_confidence = float(payload["item_confidence"])
             item_relative_position = str(payload["item_relative_position"])
             item_bearing_degrees = float(payload["item_bearing_degrees"])
+            item_distance_state = str(payload["item_distance_state"])
+            item_accessible = payload["item_accessible"]
+            item_safe_to_advance = payload["item_safe_to_advance"]
             rationale = str(payload["rationale"])
         except (KeyError, TypeError, ValueError) as exc:
             raise OpenAIRouterError(
@@ -666,8 +686,14 @@ class OpenAIQueryRouter:
             raise OpenAIRouterError("OpenAI goal seer returned invalid item bearing")
         if landmark_distance_state not in {"far", "approach", "near", "too_close", "unknown"}:
             raise OpenAIRouterError("OpenAI goal seer returned invalid landmark distance")
+        if item_distance_state not in {"far", "approach", "near", "unknown"}:
+            raise OpenAIRouterError("OpenAI goal seer returned invalid item distance")
         if not isinstance(safe_to_advance, bool):
             raise OpenAIRouterError("OpenAI goal seer returned invalid advance flag")
+        if not isinstance(item_accessible, bool):
+            raise OpenAIRouterError("OpenAI goal seer returned invalid item accessibility")
+        if not isinstance(item_safe_to_advance, bool):
+            raise OpenAIRouterError("OpenAI goal seer returned invalid item advance flag")
         if not landmark_visible:
             landmark_relative_position = "not_visible"
             landmark_bearing_degrees = 0.0
@@ -676,6 +702,9 @@ class OpenAIQueryRouter:
         if not item_visible:
             item_relative_position = "not_visible"
             item_bearing_degrees = 0.0
+            item_distance_state = "unknown"
+            item_accessible = False
+            item_safe_to_advance = False
         if landmark_distance_state in {"near", "too_close", "unknown"}:
             safe_to_advance = False
         return GoalSeerResult(
@@ -689,6 +718,9 @@ class OpenAIQueryRouter:
             item_confidence=item_confidence,
             item_relative_position=item_relative_position,
             item_bearing_degrees=item_bearing_degrees,
+            item_distance_state=item_distance_state,
+            item_accessible=item_accessible,
+            item_safe_to_advance=item_safe_to_advance,
             rationale=rationale.strip(),
         )
 

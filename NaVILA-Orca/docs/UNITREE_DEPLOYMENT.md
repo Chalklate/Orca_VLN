@@ -399,12 +399,19 @@ requested item. If the landmark is not visible, the client rotates in place in
 bounded increments and checks again; forward motion is not permitted during
 this acquisition phase. NaVILA is called only for short approach suggestions.
 The goal seer is checked before approach, periodically during approach, and
-throughout the final in-place inspection. A confirmed item produces a direct
-`StopMove()` and `goal-found ...; search complete`; NaVILA does not need to
-emit the textual `stop` action for the mission to finish. The seer is
-intentionally opt-in because each check uploads images and can trigger physical
-in-place turns. If the Go2 has no Internet route to the OpenAI API, use a
-reachable OpenAI-compatible `--openai-base-url` or omit `--landmark-seer`.
+throughout the final in-place inspection. Seeing the item is not success: the
+seer classifies it as `far`, `approach`, or `near`, and requires it to be
+accessible before declaring a find. While the item is visible but still far or
+approaching, the client replaces the waypoint text with a short item-approach
+instruction so NaVILA closes the gap instead of continuing to navigate toward
+the landmark. A confirmed item produces a direct `StopMove()` and
+`goal-found ...; search complete`; NaVILA does not need to emit the textual
+`stop` action for the mission to finish. If the item is visible but the seer
+does not consider forward motion safe, the client holds position and performs
+the bounded inspection sweep. The seer is intentionally opt-in because each
+check uploads images and can trigger physical in-place turns. If the Go2 has no
+Internet route to the OpenAI API, use a reachable OpenAI-compatible
+`--openai-base-url` or omit `--landmark-seer`.
 
 The seer needs the scan reference JPEGs as well as the JSON map. Run the scan
 on the same laptop that will run the search, or copy the scan image directory

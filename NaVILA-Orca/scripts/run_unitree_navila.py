@@ -410,7 +410,61 @@ def _goal_item_found(
     *,
     minimum_confidence: float,
 ) -> bool:
+    """Declare success only when the item is near and physically accessible."""
+
+    return (
+        result.item_visible
+        and result.item_confidence >= minimum_confidence
+        and result.item_distance_state == "near"
+        and result.item_accessible
+    )
+
+
+def _goal_item_visible(
+    result: GoalSeerResult,
+    *,
+    minimum_confidence: float,
+) -> bool:
     return result.item_visible and result.item_confidence >= minimum_confidence
+
+
+def _goal_item_approach_allowed(
+    result: GoalSeerResult,
+    *,
+    minimum_confidence: float,
+) -> bool:
+    return (
+        _goal_item_visible(result, minimum_confidence=minimum_confidence)
+        and not _goal_item_found(result, minimum_confidence=minimum_confidence)
+        and result.item_distance_state in {"far", "approach"}
+        and result.item_safe_to_advance
+    )
+
+
+def _goal_item_requires_inspection(
+    result: GoalSeerResult,
+    *,
+    minimum_confidence: float,
+) -> bool:
+    return (
+        _goal_item_visible(result, minimum_confidence=minimum_confidence)
+        and not _goal_item_found(result, minimum_confidence=minimum_confidence)
+        and not _goal_item_approach_allowed(
+            result, minimum_confidence=minimum_confidence
+        )
+    )
+
+
+def _item_approach_instruction(item_name: str) -> str:
+    """Temporarily focus NaVILA on closing the gap to an already-seen item."""
+
+    return (
+        f"The requested item, {item_name}, is visible in the current camera image. "
+        f"Approach the {item_name} through clear floor space in short increments, "
+        "keeping it in view. Do not stop merely because it is visible; continue "
+        "until it is near and accessible. Do not search for another landmark. If "
+        "the item is lost or the path is not clear, output exactly stop."
+    )
 
 
 def _goal_landmark_centered(
@@ -569,6 +623,9 @@ def _run_goal_seer_check(
         f"item_confidence={result.item_confidence:.2f} "
         f"item_position={result.item_relative_position} "
         f"item_bearing={result.item_bearing_degrees:+.1f} "
+        f"item_distance={result.item_distance_state} "
+        f"item_accessible={result.item_accessible} "
+        f"item_safe_to_advance={result.item_safe_to_advance} "
         f"rationale={result.rationale!r}",
         flush=True,
     )
@@ -969,61 +1026,78 @@ def main(argv: list[str] | None = None) -> int:
                 else:
                     # The combined seer is the final centering authority. If it
                     # disagrees with the landmark-only pass, reacquire in place
-                    # before allowing NaVILA to issue a forward action.
-                    for _ in range(2):
-                        if _goal_landmark_centered(
+                    # before allowing NaVILA to issue a forward action. Once the
+                    # requested item is visible and safe to approach, item pursuit
+                    # takes priority over centering the landmark.
+                    item_visible = _goal_item_visible(
+                        goal_result,
+                        minimum_confidence=args.goal_seer_min_item_confidence,
+                    )
+                    if not item_visible:
+                        for _ in range(2):
+                            if _goal_landmark_centered(
+                                goal_result,
+                                minimum_confidence=args.landmark_seer_min_confidence,
+                                maximum_bearing=args.landmark_seer_center_bearing_degrees,
+                            ):
+                                break
+                            visibility_result = _acquire_landmark(
+                                args=args,
+                                seer=landmark_seer,
+                                step=landmark_step,
+                                reference_image=landmark_reference,
+                                history=history,
+                                camera_worker=camera_worker,
+                                executor=executor,
+                                waypoint_index=waypoint_index,
+                                waypoint_count=waypoint_count,
+                                initial_result=_landmark_result_from_goal(goal_result),
+                            )
+                            goal_result = _run_goal_seer_check(
+                                seer=landmark_seer,
+                                item_name=str(landmark_item_name),
+                                step=landmark_step,
+                                reference_image=landmark_reference,
+                                history=history,
+                                camera_worker=camera_worker,
+                                brightness=args.image_brightness,
+                                minimum_item_confidence=args.goal_seer_min_item_confidence,
+                                minimum_landmark_confidence=args.landmark_seer_min_confidence,
+                                maximum_bearing=args.landmark_seer_center_bearing_degrees,
+                                retries=args.landmark_seer_retries,
+                                waypoint_index=waypoint_index,
+                                waypoint_count=waypoint_count,
+                            )
+                            last_goal_check = time.monotonic()
+                            item_visible = _goal_item_visible(
+                                goal_result,
+                                minimum_confidence=args.goal_seer_min_item_confidence,
+                            )
+                            if _goal_item_found(
+                                goal_result,
+                                minimum_confidence=args.goal_seer_min_item_confidence,
+                            ):
+                                if controller is not None:
+                                    controller.stop_move()
+                                print(
+                                    f"goal-found waypoint={waypoint_index}/{waypoint_count} "
+                                    f"item={landmark_item_name!r} "
+                                    f"confidence={goal_result.item_confidence:.2f}; search complete",
+                                    flush=True,
+                                )
+                                mission_found = True
+                                waypoint_stopped = True
+                                break
+                            if item_visible:
+                                break
+                    if (
+                        not mission_found
+                        and not item_visible
+                        and not _goal_landmark_centered(
                             goal_result,
                             minimum_confidence=args.landmark_seer_min_confidence,
                             maximum_bearing=args.landmark_seer_center_bearing_degrees,
-                        ):
-                            break
-                        visibility_result = _acquire_landmark(
-                            args=args,
-                            seer=landmark_seer,
-                            step=landmark_step,
-                            reference_image=landmark_reference,
-                            history=history,
-                            camera_worker=camera_worker,
-                            executor=executor,
-                            waypoint_index=waypoint_index,
-                            waypoint_count=waypoint_count,
-                            initial_result=_landmark_result_from_goal(goal_result),
                         )
-                        goal_result = _run_goal_seer_check(
-                            seer=landmark_seer,
-                            item_name=str(landmark_item_name),
-                            step=landmark_step,
-                            reference_image=landmark_reference,
-                            history=history,
-                            camera_worker=camera_worker,
-                            brightness=args.image_brightness,
-                            minimum_item_confidence=args.goal_seer_min_item_confidence,
-                            minimum_landmark_confidence=args.landmark_seer_min_confidence,
-                            maximum_bearing=args.landmark_seer_center_bearing_degrees,
-                            retries=args.landmark_seer_retries,
-                            waypoint_index=waypoint_index,
-                            waypoint_count=waypoint_count,
-                        )
-                        last_goal_check = time.monotonic()
-                        if _goal_item_found(
-                            goal_result,
-                            minimum_confidence=args.goal_seer_min_item_confidence,
-                        ):
-                            if controller is not None:
-                                controller.stop_move()
-                            print(
-                                f"goal-found waypoint={waypoint_index}/{waypoint_count} "
-                                f"item={landmark_item_name!r} "
-                                f"confidence={goal_result.item_confidence:.2f}; search complete",
-                                flush=True,
-                            )
-                            mission_found = True
-                            waypoint_stopped = True
-                            break
-                    if not mission_found and not _goal_landmark_centered(
-                        goal_result,
-                        minimum_confidence=args.landmark_seer_min_confidence,
-                        maximum_bearing=args.landmark_seer_center_bearing_degrees,
                     ):
                         raise RuntimeError(
                             f"goal seer could not center landmark {landmark_step['name']!r}; "
@@ -1031,10 +1105,22 @@ def main(argv: list[str] | None = None) -> int:
                         )
                     if (
                         not mission_found
-                        and _goal_requires_inspection(
-                            goal_result,
-                            minimum_landmark_confidence=args.landmark_seer_min_confidence,
-                            maximum_bearing=args.landmark_seer_center_bearing_degrees,
+                        and (
+                            _goal_item_requires_inspection(
+                                goal_result,
+                                minimum_confidence=args.goal_seer_min_item_confidence,
+                            )
+                            or (
+                                not _goal_item_approach_allowed(
+                                    goal_result,
+                                    minimum_confidence=args.goal_seer_min_item_confidence,
+                                )
+                                and _goal_requires_inspection(
+                                    goal_result,
+                                    minimum_landmark_confidence=args.landmark_seer_min_confidence,
+                                    maximum_bearing=args.landmark_seer_center_bearing_degrees,
+                                )
+                            )
                         )
                     ):
                         goal_result, found = _inspect_landmark_for_item(
@@ -1101,10 +1187,17 @@ def main(argv: list[str] | None = None) -> int:
                         mission_found = True
                         waypoint_stopped = True
                         break
-                    if not _goal_landmark_centered(
+                    item_visible = _goal_item_visible(
                         goal_result,
-                        minimum_confidence=args.landmark_seer_min_confidence,
-                        maximum_bearing=args.landmark_seer_center_bearing_degrees,
+                        minimum_confidence=args.goal_seer_min_item_confidence,
+                    )
+                    if (
+                        not item_visible
+                        and not _goal_landmark_centered(
+                            goal_result,
+                            minimum_confidence=args.landmark_seer_min_confidence,
+                            maximum_bearing=args.landmark_seer_center_bearing_degrees,
+                        )
                     ):
                         visibility_result = _acquire_landmark(
                             args=args,
@@ -1149,10 +1242,17 @@ def main(argv: list[str] | None = None) -> int:
                             mission_found = True
                             waypoint_stopped = True
                             break
-                        if not _goal_landmark_centered(
+                        item_visible = _goal_item_visible(
                             goal_result,
-                            minimum_confidence=args.landmark_seer_min_confidence,
-                            maximum_bearing=args.landmark_seer_center_bearing_degrees,
+                            minimum_confidence=args.goal_seer_min_item_confidence,
+                        )
+                        if (
+                            not item_visible
+                            and not _goal_landmark_centered(
+                                goal_result,
+                                minimum_confidence=args.landmark_seer_min_confidence,
+                                maximum_bearing=args.landmark_seer_center_bearing_degrees,
+                            )
                         ):
                             raise RuntimeError(
                                 f"goal seer could not center landmark {landmark_step['name']!r}; "
@@ -1160,10 +1260,22 @@ def main(argv: list[str] | None = None) -> int:
                             )
                     if (
                         not mission_found
-                        and _goal_requires_inspection(
-                            goal_result,
-                            minimum_landmark_confidence=args.landmark_seer_min_confidence,
-                            maximum_bearing=args.landmark_seer_center_bearing_degrees,
+                        and (
+                            _goal_item_requires_inspection(
+                                goal_result,
+                                minimum_confidence=args.goal_seer_min_item_confidence,
+                            )
+                            or (
+                                not _goal_item_approach_allowed(
+                                    goal_result,
+                                    minimum_confidence=args.goal_seer_min_item_confidence,
+                                )
+                                and _goal_requires_inspection(
+                                    goal_result,
+                                    minimum_landmark_confidence=args.landmark_seer_min_confidence,
+                                    maximum_bearing=args.landmark_seer_center_bearing_degrees,
+                                )
+                            )
                         )
                     ):
                         goal_result, found = _inspect_landmark_for_item(
@@ -1202,8 +1314,36 @@ def main(argv: list[str] | None = None) -> int:
                         "phase=vlm_start",
                         flush=True,
                     )
+                decision_instruction = instruction
+                if (
+                    landmark_seer is not None
+                    and goal_result is not None
+                    and _goal_item_visible(
+                        goal_result,
+                        minimum_confidence=args.goal_seer_min_item_confidence,
+                    )
+                    and not _goal_item_found(
+                        goal_result,
+                        minimum_confidence=args.goal_seer_min_item_confidence,
+                    )
+                    and _goal_item_approach_allowed(
+                        goal_result,
+                        minimum_confidence=args.goal_seer_min_item_confidence,
+                    )
+                ):
+                    decision_instruction = _item_approach_instruction(
+                        str(landmark_item_name)
+                    )
+                    print(
+                        f"item-approach waypoint={waypoint_index}/{waypoint_count} "
+                        f"item={landmark_item_name!r} "
+                        f"distance={goal_result.item_distance_state} "
+                        f"bearing={goal_result.item_bearing_degrees:+.1f}; "
+                        "prioritizing item over landmark",
+                        flush=True,
+                    )
                 phase_started = time.perf_counter()
-                baseline_output = vlm.infer(images, instruction)
+                baseline_output = vlm.infer(images, decision_instruction)
                 timings["vlm"] = time.perf_counter() - phase_started
 
                 phase_started = time.perf_counter()
@@ -1226,7 +1366,7 @@ def main(argv: list[str] | None = None) -> int:
                 total_decisions += 1
                 recorder.record(
                     decision=total_decisions,
-                    instruction=instruction,
+                    instruction=decision_instruction,
                     images=images,
                     history_frames=history_frames,
                     baseline_output=baseline_output,

@@ -147,6 +147,9 @@ def test_openai_router_goal_seer_verifies_item_separately_from_landmark():
             "item_confidence": 0.91,
             "item_relative_position": "right",
             "item_bearing_degrees": 18.0,
+            "item_distance_state": "near",
+            "item_accessible": True,
+            "item_safe_to_advance": False,
             "rationale": "The white bottle is visible on the case.",
         }
     )
@@ -163,12 +166,54 @@ def test_openai_router_goal_seer_verifies_item_separately_from_landmark():
     assert result.item_visible is True
     assert result.item_confidence == 0.91
     assert result.item_relative_position == "right"
+    assert result.item_distance_state == "near"
+    assert result.item_accessible is True
+    assert result.item_safe_to_advance is False
     assert result.safe_to_advance is False
     assert request["text"]["format"]["name"] == "memory_guide_goal_seer"
     assert request["text"]["format"]["strict"] is True
     prompt_text = request["input"][0]["content"][1]["text"]
     assert "white water bottle" in prompt_text
     assert "Gray wheeled equipment case" in prompt_text
+
+
+def test_openai_router_goal_seer_keeps_a_far_item_as_unfound():
+    client = FakeOpenAIClient(
+        {
+            "landmark_visible": True,
+            "landmark_confidence": 0.98,
+            "landmark_relative_position": "center",
+            "landmark_bearing_degrees": 0.0,
+            "landmark_distance_state": "approach",
+            "safe_to_advance": True,
+            "item_visible": True,
+            "item_confidence": 0.95,
+            "item_relative_position": "center",
+            "item_bearing_degrees": 0.0,
+            "item_distance_state": "far",
+            "item_accessible": True,
+            "item_safe_to_advance": True,
+            "rationale": "The bottle is visible on the far side of the case.",
+        }
+    )
+
+    result = OpenAIQueryRouter(client).see_goal(
+        item_name="water bottle",
+        item_description="white reusable bottle",
+        landmark_name="equipment case",
+        landmark_description="large gray case",
+        reference_image=Image.new("RGB", (4, 4), "gray"),
+        live_image=Image.new("RGB", (4, 4), "white"),
+    )
+
+    assert result.item_visible is True
+    assert result.item_distance_state == "far"
+    assert result.item_accessible is True
+    assert result.item_safe_to_advance is True
+    required = client.responses.request["text"]["format"]["schema"]["required"]
+    assert "item_distance_state" in required
+    assert "item_accessible" in required
+    assert "item_safe_to_advance" in required
 
 
 def test_openai_router_accepts_fenced_structured_output():

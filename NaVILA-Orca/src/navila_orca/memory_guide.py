@@ -27,12 +27,19 @@ DEFAULT_INVENTORY = PROJECT_ROOT / "outputs" / "memory_guide" / "inventory.json"
 DEFAULT_PLAN = PROJECT_ROOT / "outputs" / "memory_guide" / "latest_plan.json"
 DEFAULT_WAYPOINTS = PROJECT_ROOT / "outputs" / "memory_guide" / "latest_waypoints.txt"
 DEFAULT_SEMANTIC_MAP = PROJECT_ROOT / "outputs" / "memory_guide" / "semantic_map.json"
+DEFAULT_LANDMARK_MAP = PROJECT_ROOT / "outputs" / "memory_guide" / "latest_landmark_map.json"
 
 _SPACE_RE = re.compile(r"\s+")
 _PUNCTUATION_RE = re.compile(r"[^a-z0-9\s-]")
 
 
-@dataclass(frozen=True, slots=True)
+def _without_prefix(value: str, prefix: str) -> str:
+    """Python 3.8-compatible equivalent of ``str.removeprefix``."""
+
+    return value[len(prefix) :] if value.startswith(prefix) else value
+
+
+@dataclass(frozen=True)
 class ParsedQuery:
     """Structured user request produced before invoking the navigation VLM."""
 
@@ -176,7 +183,7 @@ def parse_query(
     )
     for prefix in place_prefixes:
         if normalised.startswith(prefix):
-            candidate = normalised.removeprefix(prefix).strip()
+            candidate = _without_prefix(normalised, prefix).strip()
             place = _resolve_alias(candidate, catalog.get("places", {}))
             if place is not None:
                 return ParsedQuery("navigate_place", place, original)
@@ -224,7 +231,7 @@ def _resolve_alias(
             matched = (
                 re.search(rf"\b{re.escape(candidate)}\b", normalised) is not None
                 if within_text
-                else candidate == normalised.removeprefix("the ")
+                else candidate == _without_prefix(normalised, "the ")
             )
             if matched:
                 matches.append((len(candidate), entry_id))
@@ -249,6 +256,18 @@ def load_inventory(path: Path = DEFAULT_INVENTORY) -> dict[str, Any]:
     payload = json.loads(path.read_text(encoding="utf-8"))
     if payload.get("version") != 1 or not isinstance(payload.get("observations"), dict):
         raise ValueError(f"unsupported memory-guide inventory: {path}")
+    return payload
+
+
+def load_landmark_map(path: Path) -> dict[str, Any]:
+    """Load a visual scan map containing only named, relative landmarks."""
+
+    path = Path(path).expanduser().resolve()
+    if not path.is_file():
+        raise FileNotFoundError(f"landmark map does not exist: {path}")
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    if payload.get("version") != 1 or not isinstance(payload.get("landmarks"), list):
+        raise ValueError(f"unsupported landmark map: {path}")
     return payload
 
 
@@ -326,6 +345,108 @@ def _patrol_waypoints(item_id: str, catalog: Mapping[str, Any]) -> list[str]:
         )
         for location in locations
     ]
+
+
+def _landmark_waypoints(
+    item_id: str,
+    catalog: Mapping[str, Any],
+    landmark_map: Mapping[str, Any],
+    *,
+    llm_mode: str,
+    openai_router: Any | None,
+    max_waypoints: int,
+) -> tuple[list[str], list[dict[str, Any]], str]:
+    """Turn a visual scan into conservative textual search locations.
+
+    The scan has no metric pose or odometry correction.  Each waypoint names a
+    visual arrival reference and asks NaVILA to approach through clear space;
+    it is not an open-loop coordinate command.
+    """
+
+    if max_waypoints <= 0:
+        raise ValueError("max landmark waypoints must be positive")
+    raw_landmarks = landmark_map.get("landmarks", [])
+    if not isinstance(raw_landmarks, list):
+        raise ValueError("landmark map contains an invalid landmarks list")
+    candidates: list[dict[str, Any]] = []
+    for index, raw in enumerate(raw_landmarks):
+        if not isinstance(raw, Mapping):
+            continue
+        landmark_id = str(raw.get("id", "")).strip()
+        name = str(raw.get("name", "")).strip()
+        if not landmark_id or not name:
+            continue
+        try:
+            view_index = int(raw.get("view_index", index))
+        except (TypeError, ValueError):
+            view_index = index
+        candidates.append(
+            {
+                "id": landmark_id,
+                "name": name,
+                "kind": str(raw.get("kind", "other")).strip() or "other",
+                "description": str(raw.get("description", "")).strip(),
+                "search_surface": bool(raw.get("search_surface", False)),
+                "view_index": view_index,
+                "confidence": float(raw.get("confidence", 0.0) or 0.0),
+            }
+        )
+    if not candidates:
+        return [], [], "no_landmarks"
+
+    planner_name = "deterministic_scan_order"
+    selected_ids: list[str] = []
+    if llm_mode == "openai" and openai_router is not None:
+        selected_ids = list(
+            openai_router.rank_landmarks(
+                _display_name(item_id, catalog),
+                landmark_map,
+                max_landmarks=max_waypoints,
+            )
+        )
+        planner_name = str(
+            getattr(openai_router, "router_name", "openai:gpt-5.6-luna")
+        )
+
+    by_id = {candidate["id"]: candidate for candidate in candidates}
+    if selected_ids:
+        ordered = [by_id[landmark_id] for landmark_id in selected_ids if landmark_id in by_id]
+    else:
+        ordered = sorted(
+            candidates,
+            key=lambda candidate: (
+                not candidate["search_surface"],
+                -candidate["confidence"],
+                candidate["view_index"],
+                candidate["name"].lower(),
+            ),
+        )
+    selected = ordered[:max_waypoints]
+    display_name = _display_name(item_id, catalog)
+    waypoints: list[str] = []
+    steps: list[dict[str, Any]] = []
+    for candidate in selected:
+        view_hint = f"scan view {candidate['view_index']}"
+        waypoints.append(
+            f"Navigate toward the visual landmark '{candidate['name']}' from {view_hint}. "
+            f"Use it as a visual arrival reference, stay in clear floor space, and "
+            f"stop at a safe viewing distance. Inspect accessible surfaces and the "
+            f"nearby floor around this landmark for the {display_name}. Stop after "
+            "inspecting this search location."
+        )
+        steps.append(
+            {
+                "search_location": candidate["name"],
+                "landmark_id": candidate["id"],
+                "kind": candidate["kind"],
+                "description": candidate["description"],
+                "view_index": candidate["view_index"],
+                "search_surface": candidate["search_surface"],
+                "confidence": candidate["confidence"],
+                "coverage": "visual_scan_landmark",
+            }
+        )
+    return waypoints, steps, planner_name
 
 
 def _map_waypoints(
@@ -563,6 +684,8 @@ def plan_query(
     openai_router: Any | None = None,
     openai_model_id: str | None = None,
     openai_base_url: str | None = None,
+    landmark_map: Mapping[str, Any] | None = None,
+    max_landmark_waypoints: int = 6,
 ) -> dict[str, Any]:
     """Route a natural request to direct guidance or a staged patrol."""
 
@@ -687,6 +810,22 @@ def plan_query(
         ),
         waypoints=_patrol_waypoints(parsed.target, catalog),
     )
+    if landmark_map is not None:
+        landmark_waypoints, landmark_steps, landmark_planner = _landmark_waypoints(
+            parsed.target,
+            catalog,
+            landmark_map,
+            llm_mode=llm_mode,
+            openai_router=openai_router,
+            max_waypoints=max_landmark_waypoints,
+        )
+        if landmark_waypoints:
+            plan["waypoints"] = landmark_waypoints
+            plan["landmark_map_used"] = True
+            plan["landmark_planner"] = landmark_planner
+            plan["landmark_steps"] = landmark_steps
+            plan["landmark_map_scan"] = landmark_map.get("scan", {})
+            return plan
     if semantic_map is not None:
         entry = catalog.get("items", {}).get(parsed.target, {})
         mapped_locations = entry.get("search_locations") or locations
@@ -776,6 +915,20 @@ def _build_parser() -> argparse.ArgumentParser:
             "reorders mapped inspections to avoid undemonstrated reverse travel"
         ),
     )
+    plan.add_argument(
+        "--landmark-map",
+        type=Path,
+        help=(
+            "visual landmark scan JSON; creates site-specific search waypoints "
+            "without requiring a prebuilt semantic map"
+        ),
+    )
+    plan.add_argument(
+        "--max-landmark-waypoints",
+        type=int,
+        default=6,
+        help="maximum scanned landmarks to inspect for an unknown item",
+    )
     plan.add_argument("--plan-output", type=Path, default=DEFAULT_PLAN)
     plan.add_argument("--waypoint-output", type=Path, default=DEFAULT_WAYPOINTS)
 
@@ -830,6 +983,8 @@ def main(argv: Sequence[str] | None = None) -> int:
                 raise ValueError("confidence threshold must be between 0 and 1")
             if args.max_age_hours <= 0.0:
                 raise ValueError("maximum age must be positive")
+            if args.max_landmark_waypoints <= 0:
+                raise ValueError("maximum landmark waypoints must be positive")
             plan = plan_query(
                 args.query,
                 catalog=catalog,
@@ -848,6 +1003,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                 bedrock_profile=args.bedrock_profile,
                 openai_model_id=args.openai_model_id,
                 openai_base_url=args.openai_base_url,
+                landmark_map=(
+                    load_landmark_map(args.landmark_map)
+                    if args.landmark_map is not None
+                    else None
+                ),
+                max_landmark_waypoints=args.max_landmark_waypoints,
             )
             write_plan(plan, args.plan_output, args.waypoint_output)
             print(json.dumps(plan, indent=2, ensure_ascii=False))

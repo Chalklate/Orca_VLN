@@ -21,6 +21,11 @@ client uses:
 The older A2 multicast/GStreamer adapter remains available with
 `--robot-model a2`, but it is not the default.
 
+For a Go2 run, `--robot-model go2` selects both the Go2 SDK2 VideoClient and
+Go2 SDK2 SportClient. The A2 GStreamer pipeline and A2 SDK module are not used.
+A2 names elsewhere in the repository belong to simulator/training
+configurations or the optional legacy adapter; they do not change a Go2 run.
+
 ### Selecting Ethernet or Wi-Fi
 
 `--network-interface` takes the laptop interface name, not the robot IP. To
@@ -132,9 +137,18 @@ For all commands below, the Tailscale endpoint is:
 ## 2. Copy the lightweight client to the laptop
 
 The minimum required project content is `src/navila_orca`,
-`scripts/run_unitree_navila.py`, and `scripts/run_unitree_navila.sh`. The robot
-environment needs Pillow, NumPy, CycloneDDS 0.10.2, and `unitree_sdk2py`. It
-does not need CUDA, NaVILA weights, OrcaLab, ROS 2, or MJLab.
+`assets/memory_guide_catalog.json`, `scripts/run_unitree_navila.py`,
+`scripts/run_unitree_navila.sh`, and `scripts/run_unitree_memory_guide.sh`. The
+robot environment needs Pillow, NumPy, CycloneDDS 0.10.2, and
+`unitree_sdk2py`. It does not need CUDA, NaVILA weights, OrcaLab, ROS 2, or
+MJLab.
+
+If the robot will use Luna query parsing or the landmark scan, install the
+OpenAI client into the same interpreter that runs the launcher:
+
+```bash
+python3 -m pip install 'openai>=1.0.0,<2'
+```
 
 To rebuild the lightweight laptop archive on the development PC:
 
@@ -144,6 +158,19 @@ To rebuild the lightweight laptop archive on the development PC:
 
 Copy `outputs/deployment/unitree-navila-client.tar.gz` to the laptop and
 extract it there. The archive includes the AWS tunnel helper and this guide.
+
+The archive does not vendor Unitree's SDK2 Python checkout. If SDK2 is present
+as source rather than installed into the selected interpreter, point the
+launcher at its repository root before running the client:
+
+```bash
+export UNITREE_PYTHON=/usr/bin/python3
+export UNITREE_SDK2_ROOT=/home/unitree/unitree_sdk2_python
+```
+
+The root must contain `unitree_sdk2py/`. Use the same `UNITREE_PYTHON` that can
+import both `unitree_sdk2py.core.channel` and
+`unitree_sdk2py.go2.video.video_client`.
 
 ## 3. Camera-only check
 
@@ -216,6 +243,12 @@ Do not use `--balance-stand` until the event operator confirms that automatic
 standing is desired. The default assumes the robot has already been placed in
 the correct balanced state using the approved Unitree procedure.
 
+The Go2 VideoClient adapter retries a malformed or failed JPEG sample three
+times, and the capture worker tolerates three consecutive failed capture
+cycles. A persistent camera failure still fails closed and final cleanup calls
+`StopMove()`. Tune this with `--camera-frame-retries`,
+`--camera-error-retries`, and `--camera-rpc-timeout`.
+
 ## 6. Longer run and dataset
 
 After a one-action test succeeds, increase `--max-decisions` gradually. Every
@@ -224,6 +257,123 @@ the same review schema as simulator decisions. It can be labelled with
 `scripts/label_decision_samples.py` and exported with
 `scripts/export_navila_lora_dataset.py`.
 
-The physical site's semantic map and item-memory integration remain separate
-follow-up work. First prove camera, remote inference, StopMove, and one bounded
-action end to end.
+## 7. Typed Memory Guide search
+
+The lightweight client includes the deployable part of the “Where is my bread?”
+flow. A typed query is routed locally, expanded into one waypoint per search
+location, and executed sequentially. For an unknown item such as bread, the
+default catalog produces four waypoints. The VLM receives explicit
+`Waypoint 1 of 4`, `Waypoint 2 of 4`, and so on, and the next waypoint is not
+started until the current one returns a `stop` action.
+
+Run it from the Go2 SSH terminal after validating the single-waypoint path:
+
+```bash
+./scripts/run_unitree_memory_guide.sh \
+  --query "Where is my bread?" \
+  --robot-model go2 \
+  --network-interface eth10 \
+  --vlm-host <model-pc-tailscale-ip> \
+  --vlm-port 54321 \
+  --execute-actions \
+  --max-decisions 8 \
+  --max-forward-mps 0.20 \
+  --max-yaw-rps 0.35 \
+  --max-action-seconds 0.75 \
+  --scene-id physical-site
+```
+
+`--max-decisions` is per waypoint for this launcher. The default is 8, so a
+four-waypoint patrol can make at most 32 VLM decisions. If a waypoint does not
+produce `stop` within its limit, the mission fails closed and does not silently
+advance. Frames are cleared between waypoints so the next decision is not
+dominated by the previous search location.
+
+Generate and inspect the plan without connecting to the dog:
+
+```bash
+./scripts/run_unitree_memory_guide.sh \
+  --query "Where is my bread?" \
+  --plan-only
+```
+
+The plan and waypoint files are written under `outputs/memory_guide/`. A recent
+manual observation can be stored for direct routing on the next query:
+
+```bash
+PYTHONPATH=src python3 -m navila_orca.memory_guide \
+  --inventory outputs/memory_guide/inventory.json \
+  remember --item bread --location "the kitchen counter" --confidence 0.9
+```
+
+This physical MVP does not yet automatically confirm an item or build a real
+SLAM map. A VLM `stop` marks a completed inspection waypoint; it is not by
+itself an object-detection result. Automatic inventory updates and physical
+map routing remain separate additions.
+
+## 8. Luna query parsing and a quick site scan
+
+The physical Memory Guide can use OpenAI for intent/target parsing and for
+ranking site-specific visual landmarks. Keep the API key out of scripts and
+Git. On the Go2, create a private environment file once:
+
+```bash
+cat > "$HOME/navila-secrets.env" <<'EOF'
+export OPENAI_API_KEY='paste-key-here'
+EOF
+chmod 600 "$HOME/navila-secrets.env"
+source "$HOME/navila-secrets.env"
+```
+
+Run a slow in-place eight-view scan before operating in a new room. It sends
+the captured views to the configured OpenAI model and writes
+`outputs/memory_guide/latest_landmark_map.json`:
+
+```bash
+source "$HOME/navila-secrets.env"
+python3 scripts/run_unitree_landmark_scan.py \
+  --robot-model go2 \
+  --network-interface eth10 \
+  --scan-views 8 \
+  --scan-yaw-rps 0.20 \
+  --scan-direction left \
+  --image-brightness 1.20 \
+  --execute-actions
+```
+
+The scan is intentionally an open-loop visual sweep. It has no odometry
+correction, metric coordinates, or obstacle-clearance guarantees; use a
+spotter and clear the area. The result is a list of visual references such as
+a table, door, lectern, aisle, or stage. It is useful for generating plausible
+search locations in an unfamiliar office or auditorium, but it cannot
+guarantee that the robot can safely reach each reference.
+
+Then route a query through Luna and use the scan map to choose up to six search
+locations:
+
+```bash
+source "$HOME/navila-secrets.env"
+./scripts/run_unitree_memory_guide.sh \
+  --query "Where is my bag?" \
+  --robot-model go2 \
+  --network-interface eth10 \
+  --vlm-host <model-pc-tailscale-ip> \
+  --vlm-port 54321 \
+  --llm-mode openai \
+  --openai-model-id gpt-5.6-luna \
+  --landmark-map outputs/memory_guide/latest_landmark_map.json \
+  --max-landmark-waypoints 6 \
+  --execute-actions \
+  --max-decisions 8 \
+  --max-forward-mps 0.20 \
+  --max-yaw-rps 0.35 \
+  --max-action-seconds 0.75 \
+  --image-brightness 1.20 \
+  --scene-id auditorium
+```
+
+Luna only returns structured intent, target, and landmark IDs. It does not
+return robot poses or motor commands. NaVILA receives the generated textual
+waypoints and must visually approach and stop at each one. If the Go2 has no
+Internet route to the OpenAI API, use a reachable OpenAI-compatible
+`--openai-base-url` or keep `--llm-mode deterministic`.

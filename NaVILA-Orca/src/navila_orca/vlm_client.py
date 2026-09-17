@@ -75,7 +75,8 @@ class LengthPrefixedJsonVLMClient:
         except ConnectionRefusedError as exc:
             raise ConnectionError(
                 "NaVILA VLM server is not listening at "
-                f"{self.host}:{self.port}; start scripts/start_vlm_server.sh first"
+                f"{self.host}:{self.port}; start scripts/start_navvlm_server.sh "
+                "and bind it to a reachable address first"
             ) from exc
         with sock:
             sock.settimeout(self.timeout_s)

@@ -30,7 +30,7 @@ def _float_array(value: Any, *, shape: tuple[int, ...] | None, name: str) -> Flo
     return array
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class EpisodeSpec:
     """The engine-neutral subset of a VLN-CE episode used at evaluation time."""
 
@@ -75,7 +75,7 @@ class EpisodeSpec:
         object.__setattr__(self, "metadata", dict(self.metadata))
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class RobotState:
     """A synchronized robot state at one physics control tick."""
 
@@ -116,7 +116,7 @@ class RobotState:
             )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class RenderFrame:
     """An RGB frame synchronized to a particular physics state."""
 
@@ -144,7 +144,7 @@ class RenderFrame:
         return Image.fromarray(self.rgb, mode="RGB")
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class VelocityCommand:
     """Body-frame velocity command and its exact simulated duration."""
 
@@ -167,7 +167,7 @@ class VelocityCommand:
             raise ValueError("a stop command must have zero velocity and zero duration")
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class PhysicsStep:
     state: RobotState
     reward: float = 0.0

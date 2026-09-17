@@ -14,6 +14,7 @@ from importlib import import_module
 import io
 import json
 from pathlib import Path
+import sys
 import threading
 import time
 from typing import Any, Protocol, Sequence
@@ -99,27 +100,36 @@ class Go2VideoClientCameraSource:
         network_interface: str,
         timeout_s: float = 2.0,
         initialize_channel: bool = True,
+        frame_retries: int = 3,
+        retry_delay_s: float = 0.05,
     ) -> None:
         if not network_interface.strip():
             raise ValueError("network_interface must not be empty")
         if timeout_s <= 0:
             raise ValueError("timeout_s must be positive")
+        if frame_retries < 0:
+            raise ValueError("frame_retries must be non-negative")
+        if retry_delay_s < 0:
+            raise ValueError("retry_delay_s must be non-negative")
         try:
             channel_module = import_module("unitree_sdk2py.core.channel")
             video_module = import_module("unitree_sdk2py.go2.video.video_client")
         except ImportError as exc:
             raise RuntimeError(
-                "unitree_sdk2py with Go2 VideoClient is unavailable in this "
-                "Python environment"
+                "unitree_sdk2py with Go2 VideoClient is unavailable for "
+                f"{sys.executable}: {exc}. Install SDK2 for this interpreter "
+                "or set UNITREE_SDK2_ROOT to the SDK2 Python checkout"
             ) from exc
         if initialize_channel:
             channel_module.ChannelFactoryInitialize(0, network_interface)
         self.network_interface = network_interface
+        self.frame_retries = int(frame_retries)
+        self.retry_delay_s = float(retry_delay_s)
         self._client = video_module.VideoClient()
         self._client.SetTimeout(float(timeout_s))
         self._client.Init()
 
-    def read(self) -> Image.Image:
+    def _read_once(self) -> Image.Image:
         code, data = self._client.GetImageSample()
         if code != 0:
             raise RuntimeError(f"Go2 VideoClient GetImageSample failed with code {code}")
@@ -128,16 +138,44 @@ class Go2VideoClientCameraSource:
             raise RuntimeError("Go2 VideoClient returned an empty image")
         try:
             with Image.open(io.BytesIO(encoded)) as image:
+                image.load()
                 return image.convert("RGB").copy()
         except Exception as exc:
-            raise RuntimeError("Go2 VideoClient returned an invalid JPEG image") from exc
+            raise RuntimeError(
+                "Go2 VideoClient returned an invalid JPEG image "
+                f"({len(encoded)} bytes)"
+            ) from exc
+
+    def read(self) -> Image.Image:
+        """Read a valid frame, retrying transient SDK2 transport/decode errors.
+
+        SDK2 can occasionally return a short or otherwise undecodable sample
+        while the camera service is changing frames.  Do not accept the bad
+        bytes, but do not tear down a mission for one transient sample either.
+        Persistent failures still propagate to the capture worker, which then
+        fails closed and stops the robot.
+        """
+
+        attempts = self.frame_retries + 1
+        last_error: Exception | None = None
+        for attempt in range(attempts):
+            try:
+                return self._read_once()
+            except Exception as exc:
+                last_error = exc
+                if attempt + 1 < attempts and self.retry_delay_s > 0.0:
+                    time.sleep(self.retry_delay_s)
+        assert last_error is not None
+        raise RuntimeError(
+            f"Go2 VideoClient frame failed after {attempts} attempt(s): {last_error}"
+        ) from last_error
 
     def close(self) -> None:
         # The SDK2 Python VideoClient exposes no close method.
         return None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class HistoryFrame:
     sequence: int
     captured_monotonic_s: float
@@ -182,6 +220,13 @@ class JpegFrameHistory:
     def __len__(self) -> int:
         with self._condition:
             return len(self._frames)
+
+    def clear(self) -> None:
+        """Discard retained frames while leaving the capture sequence intact."""
+
+        with self._condition:
+            self._frames.clear()
+            self._condition.notify_all()
 
     def wait_for(self, count: int, timeout_s: float) -> bool:
         if count <= 0:
@@ -241,15 +286,24 @@ class CameraCaptureWorker:
         history: JpegFrameHistory,
         *,
         capture_hz: float = 5.0,
+        max_consecutive_errors: int = 3,
+        error_backoff_s: float = 0.05,
     ) -> None:
         if capture_hz <= 0:
             raise ValueError("capture_hz must be positive")
+        if max_consecutive_errors < 0:
+            raise ValueError("max_consecutive_errors must be non-negative")
+        if error_backoff_s < 0:
+            raise ValueError("error_backoff_s must be non-negative")
         self.source = source
         self.history = history
         self.capture_hz = float(capture_hz)
+        self.max_consecutive_errors = int(max_consecutive_errors)
+        self.error_backoff_s = float(error_backoff_s)
         self._stop = threading.Event()
         self._thread: threading.Thread | None = None
         self.error: BaseException | None = None
+        self.dropped_frames = 0
 
     def start(self) -> None:
         if self._thread is not None:
@@ -261,10 +315,20 @@ class CameraCaptureWorker:
 
     def _run(self) -> None:
         period = 1.0 / self.capture_hz
+        consecutive_errors = 0
         try:
             while not self._stop.is_set():
                 started = time.monotonic()
-                self.history.append(self.source.read())
+                try:
+                    self.history.append(self.source.read())
+                except Exception:
+                    consecutive_errors += 1
+                    self.dropped_frames += 1
+                    if consecutive_errors > self.max_consecutive_errors:
+                        raise
+                    self._stop.wait(self.error_backoff_s)
+                    continue
+                consecutive_errors = 0
                 self._stop.wait(max(0.0, period - (time.monotonic() - started)))
         except BaseException as exc:
             self.error = exc
@@ -281,7 +345,7 @@ class CameraCaptureWorker:
             self._thread.join(timeout=2.0)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class SafetyLimits:
     """Deployment limits deliberately below Unitree's hardware capabilities."""
 
@@ -457,6 +521,8 @@ class HardwareDecisionRecorder:
         parsed_command: VelocityCommand,
         bounded_command: VelocityCommand,
         executed: bool,
+        waypoint_index: int | None = None,
+        waypoint_count: int | None = None,
     ) -> dict[str, Any]:
         if len(images) != NUM_VIDEO_FRAMES:
             raise ValueError("a hardware decision requires exactly eight images")
@@ -493,6 +559,8 @@ class HardwareDecisionRecorder:
             "baseline_command": asdict(parsed_command),
             "bounded_command": asdict(bounded_command),
             "executed": bool(executed),
+            "waypoint_index": waypoint_index,
+            "waypoint_count": waypoint_count,
             "target_action": None,
             "reviewer": None,
         }

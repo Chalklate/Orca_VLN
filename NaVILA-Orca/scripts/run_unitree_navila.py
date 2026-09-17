@@ -49,11 +49,27 @@ def _nonnegative_float(value: str) -> float:
     return parsed
 
 
+def _nonnegative_int(value: str) -> int:
+    parsed = int(value)
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("value must be non-negative")
+    return parsed
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Portable A2/Go2 camera to remote-NaVILA gateway."
     )
-    parser.add_argument("--instruction", required=True)
+    instruction_group = parser.add_mutually_exclusive_group(required=True)
+    instruction_group.add_argument(
+        "--instruction",
+        help="single navigation instruction",
+    )
+    instruction_group.add_argument(
+        "--waypoint-instruction-file",
+        type=Path,
+        help="UTF-8 file containing one navigation instruction per line",
+    )
     parser.add_argument("--robot-model", choices=("a2", "go2"), default="go2")
     parser.add_argument(
         "--network-interface",
@@ -70,6 +86,18 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--vlm-port", type=int, default=54321)
     parser.add_argument("--vlm-timeout", type=_positive_float, default=120.0)
     parser.add_argument("--capture-hz", type=_positive_float, default=5.0)
+    parser.add_argument(
+        "--camera-rpc-timeout", type=_positive_float, default=2.0,
+        help="SDK2 VideoClient request timeout in seconds",
+    )
+    parser.add_argument(
+        "--camera-frame-retries", type=_nonnegative_int, default=3,
+        help="retries for one malformed or failed Go2 JPEG sample",
+    )
+    parser.add_argument(
+        "--camera-error-retries", type=_nonnegative_int, default=3,
+        help="bad capture cycles tolerated before the camera fails closed",
+    )
     parser.add_argument(
         "--image-brightness",
         type=_positive_float,
@@ -93,7 +121,12 @@ def _parser() -> argparse.ArgumentParser:
         default=0,
         help="0 keeps the complete compressed history, matching NaVILA",
     )
-    parser.add_argument("--max-decisions", type=int, default=1)
+    parser.add_argument(
+        "--max-decisions",
+        type=int,
+        default=1,
+        help="maximum VLM decisions per instruction/waypoint",
+    )
     parser.add_argument("--decision-pause", type=_nonnegative_float, default=0.2)
     parser.add_argument("--max-forward-mps", type=_nonnegative_float, default=0.20)
     parser.add_argument("--max-lateral-mps", type=_nonnegative_float, default=0.0)
@@ -125,6 +158,19 @@ def _default_output() -> Path:
     return PROJECT_ROOT / "outputs" / "unitree" / stamp / "decision_samples"
 
 
+def _load_instructions(args: argparse.Namespace) -> list[str]:
+    if args.instruction is not None:
+        return [str(args.instruction).strip()]
+    path = args.waypoint_instruction_file.expanduser().resolve()
+    if not path.is_file():
+        raise ValueError(f"waypoint instruction file does not exist: {path}")
+    instructions = [line.strip() for line in path.read_text(encoding="utf-8").splitlines()]
+    instructions = [line for line in instructions if line]
+    if not instructions:
+        raise ValueError(f"waypoint instruction file is empty: {path}")
+    return instructions
+
+
 def _validate_args(args: argparse.Namespace) -> None:
     if args.camera_warmup_frames <= 0:
         raise ValueError("--camera-warmup-frames must be positive")
@@ -148,9 +194,12 @@ def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
         _validate_args(args)
+        instructions = _load_instructions(args)
     except ValueError as exc:
         print(f"configuration error: {exc}", file=sys.stderr)
         return 2
+
+    waypoint_count = len(instructions)
 
     output = (args.output or _default_output()).expanduser().resolve()
     episode_id = args.episode_id or output.parent.name
@@ -174,11 +223,14 @@ def main(argv: list[str] | None = None) -> int:
 
     previous_sigint = signal.signal(signal.SIGINT, request_stop)
     previous_sigterm = signal.signal(signal.SIGTERM, request_stop)
+    previous_sighup = signal.signal(signal.SIGHUP, request_stop)
     try:
         if args.robot_model == "go2":
             camera = Go2VideoClientCameraSource(
                 network_interface=args.network_interface,
+                timeout_s=args.camera_rpc_timeout,
                 initialize_channel=True,
+                frame_retries=args.camera_frame_retries,
             )
         else:
             pipeline = args.camera_pipeline or A2_GSTREAMER_PIPELINE.format(
@@ -200,7 +252,10 @@ def main(argv: list[str] | None = None) -> int:
 
         history = JpegFrameHistory(max_frames=args.max_history_frames)
         camera_worker = CameraCaptureWorker(
-            camera, history, capture_hz=args.capture_hz
+            camera,
+            history,
+            capture_hz=args.capture_hz,
+            max_consecutive_errors=args.camera_error_retries,
         )
         camera_worker.start()
         if not history.wait_for(args.camera_warmup_frames, args.camera_timeout):
@@ -237,46 +292,88 @@ def main(argv: list[str] | None = None) -> int:
             flush=True,
         )
 
-        for decision in range(1, args.max_decisions + 1):
+        total_decisions = 0
+        for waypoint_index, raw_instruction in enumerate(instructions, start=1):
             if interrupted:
                 break
-            camera_worker.ensure_healthy()
-            images, history_frames = history.sample()
-            images = brighten_images(images, args.image_brightness)
-            baseline_output = vlm.infer(images, args.instruction)
-            try:
-                parsed = parse_velocity_command(baseline_output)
-            except ActionParseError:
-                if controller is not None:
-                    controller.stop_move()
-                raise
-            bounded = limits.apply(parsed)
-            recorder.record(
-                decision=decision,
-                instruction=args.instruction,
-                images=images,
-                history_frames=history_frames,
-                baseline_output=baseline_output,
-                parsed_command=parsed,
-                bounded_command=bounded,
-                executed=args.execute_actions,
-            )
+            instruction = raw_instruction
+            if waypoint_count > 1:
+                instruction = (
+                    f"Waypoint {waypoint_index} of {waypoint_count}. "
+                    f"{raw_instruction}"
+                )
             print(
-                f"decision={decision} model={baseline_output!r} "
-                f"bounded=(vx={bounded.vx:.3f}, vy={bounded.vy:.3f}, "
-                f"wz={bounded.wz:.3f}, duration={bounded.duration_s:.2f}, "
-                f"stop={bounded.stop})",
+                f"waypoint={waypoint_index}/{waypoint_count} "
+                f"instruction={raw_instruction!r}",
                 flush=True,
             )
-            if bounded.stop:
-                if controller is not None:
-                    controller.stop_move()
-                break
-            if executor is not None:
-                executor.execute(parsed)
+            waypoint_stopped = False
+            for waypoint_decision in range(1, args.max_decisions + 1):
+                if interrupted:
+                    break
+                camera_worker.ensure_healthy()
+                images, history_frames = history.sample()
+                images = brighten_images(images, args.image_brightness)
+                baseline_output = vlm.infer(images, instruction)
+                try:
+                    parsed = parse_velocity_command(baseline_output)
+                except ActionParseError:
+                    if controller is not None:
+                        controller.stop_move()
+                    raise
+                bounded = limits.apply(parsed)
+                total_decisions += 1
+                recorder.record(
+                    decision=total_decisions,
+                    instruction=instruction,
+                    images=images,
+                    history_frames=history_frames,
+                    baseline_output=baseline_output,
+                    parsed_command=parsed,
+                    bounded_command=bounded,
+                    executed=args.execute_actions,
+                    waypoint_index=waypoint_index,
+                    waypoint_count=waypoint_count,
+                )
+                print(
+                    f"waypoint={waypoint_index}/{waypoint_count} "
+                    f"decision={waypoint_decision}/{args.max_decisions} "
+                    f"model={baseline_output!r} "
+                    f"bounded=(vx={bounded.vx:.3f}, vy={bounded.vy:.3f}, "
+                    f"wz={bounded.wz:.3f}, duration={bounded.duration_s:.2f}, "
+                    f"stop={bounded.stop})",
+                    flush=True,
+                )
+                if bounded.stop:
+                    if controller is not None:
+                        controller.stop_move()
+                    waypoint_stopped = True
+                    print(
+                        f"waypoint={waypoint_index}/{waypoint_count} complete",
+                        flush=True,
+                    )
+                    break
+                if executor is not None:
+                    executor.execute(parsed)
+                if interrupted:
+                    break
+                time.sleep(args.decision_pause)
+
             if interrupted:
                 break
-            time.sleep(args.decision_pause)
+            if not waypoint_stopped:
+                raise RuntimeError(
+                    f"waypoint {waypoint_index}/{waypoint_count} reached "
+                    f"--max-decisions ({args.max_decisions}) without a stop action"
+                )
+            if waypoint_index < waypoint_count:
+                history.clear()
+                if not history.wait_for(args.camera_warmup_frames, args.camera_timeout):
+                    camera_worker.ensure_healthy()
+                    raise RuntimeError(
+                        f"camera produced only {len(history)} frame(s) while "
+                        f"starting waypoint {waypoint_index + 1}/{waypoint_count}"
+                    )
     except KeyboardInterrupt:
         interrupted = True
     except Exception as exc:
@@ -285,8 +382,15 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         signal.signal(signal.SIGINT, previous_sigint)
         signal.signal(signal.SIGTERM, previous_sigterm)
+        signal.signal(signal.SIGHUP, previous_sighup)
         if camera_worker is not None:
             camera_worker.close()
+            if camera_worker.dropped_frames:
+                print(
+                    f"camera warning: recovered after {camera_worker.dropped_frames} "
+                    "dropped capture cycle(s)",
+                    file=sys.stderr,
+                )
         if controller is not None:
             try:
                 controller.stop_move()

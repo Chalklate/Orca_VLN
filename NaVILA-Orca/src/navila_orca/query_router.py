@@ -17,7 +17,7 @@ SUPPORTED_INTENTS = (
 SUPPORTED_TARGET_TYPES = ("item", "place", "none")
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class RouteDecision:
     """Validated semantic result returned by an LLM provider."""
 

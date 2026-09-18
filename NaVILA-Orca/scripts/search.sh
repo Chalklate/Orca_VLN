@@ -5,15 +5,17 @@ source ~/.openaikey && \
   --query "Where is my white water bottle?" \
   --llm-mode openai \
   --robot-model go2 \
+  --print-timings \
   --execute-actions \
   --balance-stand \
   --landmark-seer \
-  --max-decisions 8 \
-  --max-forward-mps 0.20 \
-  --max-yaw-rps 0.35 \
-  --max-action-seconds 0.75 \
-  --landmark-seer-check-interval 0.5 \
-  --landmark-seer-max-forward-action-seconds 0.25 \
+  --max-decisions 32 \
+  --max-forward-mps 1.00 \
+  --max-yaw-rps 1.00 \
+  --max-action-seconds 2.00 \
+  --landmark-seer-turn-degrees 30 \
+  --landmark-seer-check-interval 1.0 \
+  --landmark-seer-max-forward-action-seconds 2.00 \
   --goal-seer-max-inspection-turns 24 \
   --network-interface enx00e04c680456 \
   --vlm-host 127.0.0.1 \

@@ -4,6 +4,7 @@ import json
 import pytest
 
 from navila_orca.memory_guide import (
+    _landmark_waypoint_instruction,
     load_catalog,
     load_inventory,
     main,
@@ -179,3 +180,39 @@ def test_scan_waypoint_keeps_reference_metadata_out_of_navila_prompt(catalog):
     assert "reference_image" not in plan["waypoints"][0]
     assert plan["target_display_name"] == "bag"
     assert plan["landmark_steps"][0]["reference_image"] == "/scan/view_002.jpg"
+
+
+def test_landmark_waypoint_is_short_and_seer_owns_item_stop(catalog):
+    plan = plan_query(
+        "Where is my bread?",
+        catalog=catalog,
+        inventory={"version": 1, "observations": {}},
+        landmark_map={
+            "version": 1,
+            "landmarks": [
+                {
+                    "id": "landmark_001",
+                    "name": "Gray equipment case",
+                    "kind": "equipment_case",
+                    "description": "Large gray wheeled case",
+                    "search_surface": True,
+                }
+            ],
+        },
+        max_landmark_waypoints=1,
+    )
+
+    waypoint = plan["waypoints"][0]
+    assert waypoint == _landmark_waypoint_instruction("Gray equipment case")
+    assert waypoint == "Walk to the gray equipment case."
+    assert "Find the bread" not in waypoint
+    assert "bread is visible" not in waypoint
+    assert "Do not search another location" not in waypoint
+    assert "clear floor space" not in waypoint
+
+
+def test_landmark_waypoint_keeps_salient_color_from_scan_description():
+    assert _landmark_waypoint_instruction(
+        "Low box pile",
+        "Broad low stack of unlabeled brown cardboard boxes along the wall.",
+    ) == "Walk to the brown low box pile."

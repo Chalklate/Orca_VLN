@@ -410,13 +410,21 @@ def _goal_item_found(
     *,
     minimum_confidence: float,
 ) -> bool:
-    """Declare success only when the item is near and physically accessible."""
+    """Declare visual-search success only after reaching the search surface.
+
+    This mission locates objects; it does not manipulate them. Once the robot is
+    near the verified landmark and the item is near in the live image, a clearly
+    visible item on that landmark's table, desk, shelf, or floor counts as found
+    even when it is not physically graspable. Requiring both distances prevents
+    an item on a nearby-looking surface from ending the mission while the robot
+    is still only in the landmark approach phase.
+    """
 
     return (
         result.item_visible
         and result.item_confidence >= minimum_confidence
+        and result.landmark_distance_state in {"near", "too_close"}
         and result.item_distance_state == "near"
-        and result.item_accessible
     )
 
 
@@ -436,8 +444,28 @@ def _goal_item_approach_allowed(
     return (
         _goal_item_visible(result, minimum_confidence=minimum_confidence)
         and not _goal_item_found(result, minimum_confidence=minimum_confidence)
-        and result.item_distance_state in {"far", "approach"}
+        and result.item_distance_state in {"far", "approach", "near"}
         and result.item_safe_to_advance
+    )
+
+
+def _goal_seer_requires_more_approach(
+    result: GoalSeerResult,
+    *,
+    minimum_item_confidence: float,
+    minimum_landmark_confidence: float,
+) -> bool:
+    """Return true when a NaVILA stop must not complete the current waypoint."""
+
+    if _goal_item_approach_allowed(
+        result, minimum_confidence=minimum_item_confidence
+    ):
+        return True
+    return (
+        result.landmark_visible
+        and result.landmark_confidence >= minimum_landmark_confidence
+        and result.landmark_distance_state in {"far", "approach"}
+        and result.safe_to_advance
     )
 
 
@@ -458,13 +486,7 @@ def _goal_item_requires_inspection(
 def _item_approach_instruction(item_name: str) -> str:
     """Temporarily focus NaVILA on closing the gap to an already-seen item."""
 
-    return (
-        f"The requested item, {item_name}, is visible in the current camera image. "
-        f"Approach the {item_name} through clear floor space in short increments, "
-        "keeping it in view. Do not stop merely because it is visible; continue "
-        "until it is near and accessible. Do not search for another landmark. If "
-        "the item is lost or the path is not clear, output exactly stop."
-    )
+    return f"Walk toward the {item_name}."
 
 
 def _goal_landmark_centered(
@@ -524,6 +546,7 @@ def _run_landmark_seer_check(
     camera_worker.ensure_healthy()
     live_images, _ = history.sample()
     live_image = brighten_images(live_images, brightness)[-1]
+    seer_started = time.perf_counter()
     result = None
     for attempt in range(retries + 1):
         try:
@@ -545,6 +568,7 @@ def _run_landmark_seer_check(
             )
             time.sleep(0.20)
     assert result is not None
+    seer_latency = time.perf_counter() - seer_started
     visible = _seer_target_visible(result, minimum_confidence=minimum_confidence)
     centered = _seer_target_centered(
         result,
@@ -556,7 +580,8 @@ def _run_landmark_seer_check(
         f"visible={visible} centered={centered} raw_visible={result.target_visible} "
         f"confidence={result.confidence:.2f} position={result.relative_position} "
         f"bearing={result.bearing_degrees:+.1f} distance={result.distance_state} "
-        f"safe_to_advance={result.safe_to_advance} rationale={result.rationale!r}",
+        f"safe_to_advance={result.safe_to_advance} latency={seer_latency:.3f}s "
+        f"rationale={result.rationale!r}",
         flush=True,
     )
     return result
@@ -581,6 +606,7 @@ def _run_goal_seer_check(
     camera_worker.ensure_healthy()
     live_images, _ = history.sample()
     live_image = brighten_images(live_images, brightness)[-1]
+    seer_started = time.perf_counter()
     result = None
     for attempt in range(retries + 1):
         try:
@@ -603,6 +629,7 @@ def _run_goal_seer_check(
             )
             time.sleep(0.20)
     assert result is not None
+    seer_latency = time.perf_counter() - seer_started
     landmark_centered = _goal_landmark_centered(
         result,
         minimum_confidence=minimum_landmark_confidence,
@@ -626,6 +653,7 @@ def _run_goal_seer_check(
         f"item_distance={result.item_distance_state} "
         f"item_accessible={result.item_accessible} "
         f"item_safe_to_advance={result.item_safe_to_advance} "
+        f"latency={seer_latency:.3f}s "
         f"rationale={result.rationale!r}",
         flush=True,
     )
@@ -884,11 +912,15 @@ def main(argv: list[str] | None = None) -> int:
     camera_worker = None
     interrupted = False
 
-    def request_stop(_signum: int, _frame: object) -> None:
+    def request_stop(signum: int, _frame: object) -> None:
         nonlocal interrupted
         interrupted = True
         if executor is not None:
             executor.request_stop()
+        # Break a blocking VLM/seer network call immediately on Ctrl-C so the
+        # finally block can issue the robot StopMove.
+        if signum == signal.SIGINT:
+            raise KeyboardInterrupt
 
     previous_sigint = signal.signal(signal.SIGINT, request_stop)
     previous_sigterm = signal.signal(signal.SIGTERM, request_stop)
@@ -1392,6 +1424,56 @@ def main(argv: list[str] | None = None) -> int:
                         controller.stop_move()
                     timings["action"] = time.perf_counter() - phase_started
                     timings["pause"] = 0.0
+
+                    # NaVILA can mistake a visually plausible approach state for
+                    # completion. Never advance to another search landmark while
+                    # the seer still says the requested item is visible but far
+                    # or merely approaching. Recheck first; the seer remains the
+                    # authority for the mission-complete stop.
+                    premature_seer_stop = (
+                        landmark_seer is not None
+                        and goal_result is not None
+                        and _goal_seer_requires_more_approach(
+                            goal_result,
+                            minimum_item_confidence=args.goal_seer_min_item_confidence,
+                            minimum_landmark_confidence=args.landmark_seer_min_confidence,
+                        )
+                    )
+                    if premature_seer_stop:
+                        last_goal_check = 0.0
+                        print(
+                            f"goal-seer rejected NaVILA stop waypoint="
+                            f"{waypoint_index}/{waypoint_count} "
+                            f"item={landmark_item_name!r} "
+                            f"item_distance={goal_result.item_distance_state} "
+                            f"landmark_distance={goal_result.landmark_distance_state}; "
+                            "continuing item approach",
+                            flush=True,
+                        )
+                        if args.print_timings:
+                            timings["processing"] = sum(
+                                timings[name]
+                                for name in (
+                                    "health", "sample", "preprocess", "vlm",
+                                    "parse", "record",
+                                )
+                            )
+                            timings["total"] = time.perf_counter() - decision_started
+                            print(
+                                f"timing waypoint={waypoint_index}/{waypoint_count} "
+                                f"decision={waypoint_decision}/{args.max_decisions} "
+                                + " ".join(
+                                    f"{name}={timings[name]:.3f}s"
+                                    for name in (
+                                        "health", "sample", "preprocess", "vlm",
+                                        "parse", "record", "processing", "action",
+                                        "pause", "total",
+                                    )
+                                ),
+                                flush=True,
+                            )
+                        continue
+
                     waypoint_stopped = True
                     print(
                         f"waypoint={waypoint_index}/{waypoint_count} complete",

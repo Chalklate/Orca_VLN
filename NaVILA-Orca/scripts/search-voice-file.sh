@@ -18,7 +18,7 @@ fi
   --voice-translate \
   --llm-mode openai \
   --robot-model go2 \
-  --plan-only \
+  --execute-actions \
   --balance-stand \
   --landmark-seer \
   --max-decisions 8 \

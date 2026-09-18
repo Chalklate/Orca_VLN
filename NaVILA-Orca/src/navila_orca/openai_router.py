@@ -65,12 +65,25 @@ class GoalSeerResult:
 class OpenAIQueryRouter:
     """Route Memory Guide text through the OpenAI Responses API."""
 
-    def __init__(self, client: Any, *, model_id: str = DEFAULT_MODEL_ID) -> None:
+    def __init__(
+        self,
+        client: Any,
+        *,
+        model_id: str = DEFAULT_MODEL_ID,
+        reasoning_effort: str = "medium",
+    ) -> None:
         model_id = str(model_id).strip()
         if not model_id:
             raise OpenAIRouterError("OpenAI model ID must not be empty")
+        reasoning_effort = str(reasoning_effort).strip().lower()
+        if reasoning_effort not in {"none", "low", "medium", "high", "xhigh", "max"}:
+            raise OpenAIRouterError(
+                "OpenAI reasoning effort must be one of none, low, medium, "
+                "high, xhigh, or max"
+            )
         self.client = client
         self.model_id = model_id
+        self.reasoning_effort = reasoning_effort
 
     @property
     def router_name(self) -> str:
@@ -83,6 +96,7 @@ class OpenAIQueryRouter:
         model_id: str | None = None,
         api_key: str | None = None,
         base_url: str | None = None,
+        reasoning_effort: str | None = None,
     ) -> "OpenAIQueryRouter":
         """Build an OpenAI client from environment credentials and settings."""
 
@@ -114,6 +128,11 @@ class OpenAIQueryRouter:
                 model_id
                 or os.environ.get("NAVILA_OPENAI_MODEL")
                 or DEFAULT_MODEL_ID
+            ),
+            reasoning_effort=(
+                reasoning_effort
+                or os.environ.get("NAVILA_OPENAI_REASONING_EFFORT")
+                or "medium"
             ),
         )
 
@@ -268,7 +287,7 @@ class OpenAIQueryRouter:
                     "minItems": 1,
                     "maxItems": max_landmarks,
                 },
-                "rationale": {"type": "string"},
+                "rationale": {"type": "string", "maxLength": 160},
             },
             "required": ["landmark_ids", "rationale"],
         }
@@ -289,9 +308,13 @@ class OpenAIQueryRouter:
         )
         request = {
             "model": self.model_id,
+            "reasoning": {"effort": self.reasoning_effort},
             "instructions": instructions,
             "input": user_prompt,
-            "max_output_tokens": 512,
+            # Leave enough room for reasoning plus the strict JSON object.  The
+            # Responses token limit includes reasoning tokens, not just the
+            # visible landmark IDs and rationale.
+            "max_output_tokens": 1024,
             "store": False,
             "text": {
                 "format": {
@@ -415,6 +438,7 @@ class OpenAIQueryRouter:
         }
         request = {
             "model": self.model_id,
+            "reasoning": {"effort": self.reasoning_effort},
             "instructions": (
                 "You are a conservative visual landmark verifier for a mobile robot. "
                 "Use only evidence in the two supplied images. A partial or ambiguous "
@@ -528,13 +552,17 @@ class OpenAIQueryRouter:
                     "is clearly visible in the live image. The item may be absent "
                     "from the reference image; never infer that the item is present "
                     "from the text or reference. Only set item_visible=true when "
-                    "the item is visually identifiable in the live image, preferably "
-                    "on an accessible surface or nearby floor in this search area. "
+                    "the item is visually identifiable in the live image. The robot "
+                    "only needs to locate the item, not pick it up: a visible item "
+                    "on a reachable table, desk, shelf, or nearby floor counts as "
+                    "inspectable. Do not require the item to be on the floor. "
                     "Estimate item distance from framing as far, approach, near, or "
-                    "unknown. Set item_accessible=true only when it is on an accessible "
-                    "surface or nearby floor and not blocked or hidden. Set "
-                    "item_safe_to_advance=true only when approaching it through visible "
-                    "floor space is reasonable; otherwise set it false. "
+                    "unknown. Set item_accessible=true when the item is clearly "
+                    "inspectable from a safe robot position, including on a reachable "
+                    "table, desk, or shelf; it need not be physically graspable. Set "
+                    "item_safe_to_advance=true only when the robot can approach the "
+                    "current landmark/search surface through visible floor space; the "
+                    "item itself need not be on the floor. "
                     "Estimate landmark bearing with negative=left and positive=right. "
                     "Estimate landmark distance from framing only. Set safe_to_advance "
                     "false when the landmark is near, too close, cropped, or its "
@@ -621,6 +649,7 @@ class OpenAIQueryRouter:
         }
         request = {
             "model": self.model_id,
+            "reasoning": {"effort": self.reasoning_effort},
             "instructions": (
                 "You are the goal verifier for a mobile indoor robot. Use only the "
                 "two supplied images. Never output motor commands, coordinates, or "

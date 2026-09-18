@@ -31,6 +31,28 @@ DEFAULT_LANDMARK_MAP = PROJECT_ROOT / "outputs" / "memory_guide" / "latest_landm
 
 _SPACE_RE = re.compile(r"\s+")
 _PUNCTUATION_RE = re.compile(r"[^a-z0-9\s-]")
+_LANDMARK_COLOR_WORDS = frozenset(
+    {
+        "black",
+        "blue",
+        "brown",
+        "dark",
+        "gray",
+        "grey",
+        "green",
+        "light",
+        "orange",
+        "pink",
+        "purple",
+        "red",
+        "white",
+        "yellow",
+    }
+)
+_LANDMARK_DESCRIPTION_RELATION_RE = re.compile(
+    r"\b(?:with|supporting|beside|near|next to|on|under|behind|in front of)\b",
+    re.IGNORECASE,
+)
 
 
 def _without_prefix(value: str, prefix: str) -> str:
@@ -347,6 +369,26 @@ def _patrol_waypoints(item_id: str, catalog: Mapping[str, Any]) -> list[str]:
     ]
 
 
+def _landmark_waypoint_instruction(
+    landmark_name: str,
+    landmark_description: str = "",
+) -> str:
+    """Build the short reactive instruction sent to NaVILA for one landmark."""
+
+    prompt_name = " ".join(str(landmark_name).strip().lower().split())
+    name_words = set(_normalise(prompt_name).split())
+    if not name_words & _LANDMARK_COLOR_WORDS:
+        description_prefix = _LANDMARK_DESCRIPTION_RELATION_RE.split(
+            str(landmark_description), maxsplit=1
+        )[0]
+        description_words = set(_normalise(description_prefix).split())
+        for color in _normalise(description_prefix).split():
+            if color in _LANDMARK_COLOR_WORDS:
+                prompt_name = f"{color} {prompt_name}"
+                break
+    return f"Walk to the {prompt_name}."
+
+
 def _landmark_waypoints(
     item_id: str,
     catalog: Mapping[str, Any],
@@ -467,15 +509,13 @@ def _landmark_waypoints(
     waypoints: list[str] = []
     steps: list[dict[str, Any]] = []
     for candidate in selected:
-        # Keep the NaVILA instruction short and grounded in the current camera.
-        # Scan metadata and descriptions belong in the seer/coordinator input,
-        # not in the reactive policy prompt.
+        # Keep NaVILA focused on the immediate visual control task. Visibility,
+        # distance, accessibility, and waypoint transitions belong to the
+        # seer/coordinator, not in this reactive policy prompt.
         waypoints.append(
-            f"Find the {display_name}. Approach only the visible landmark "
-            f"'{candidate['name']}' through clear floor space in short increments. "
-            f"If the {display_name} is visible, output exactly stop. If the landmark "
-            "is close, cropped, or not visible, output exactly stop. Do not search "
-            "another location."
+            _landmark_waypoint_instruction(
+                candidate["name"], candidate["description"]
+            )
         )
         steps.append(
             {

@@ -175,6 +175,9 @@ def test_openai_router_goal_seer_verifies_item_separately_from_landmark():
     prompt_text = request["input"][0]["content"][1]["text"]
     assert "white water bottle" in prompt_text
     assert "Gray wheeled equipment case" in prompt_text
+    seer_instructions = request["input"][0]["content"][0]["text"]
+    assert "not pick it up" in seer_instructions
+    assert "reachable table, desk, shelf" in seer_instructions
 
 
 def test_openai_router_goal_seer_keeps_a_far_item_as_unfound():

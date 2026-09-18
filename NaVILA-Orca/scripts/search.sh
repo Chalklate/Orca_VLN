@@ -9,7 +9,7 @@ source ~/.openaikey && \
   --execute-actions \
   --balance-stand \
   --landmark-seer \
-  --max-decisions 32 \
+  --max-decisions 128 \
   --max-forward-mps 1.00 \
   --max-yaw-rps 1.00 \
   --max-action-seconds 2.00 \
@@ -19,4 +19,5 @@ source ~/.openaikey && \
   --goal-seer-max-inspection-turns 24 \
   --network-interface enx00e04c680456 \
   --vlm-host 127.0.0.1 \
-  --vlm-port 54321;
+  --vlm-port 54321 \
+  --scene-id school;

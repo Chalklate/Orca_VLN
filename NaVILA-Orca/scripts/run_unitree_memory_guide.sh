@@ -10,6 +10,7 @@ fi
 
 QUERY=""
 VOICE_REQUESTED=false
+VOICE_INTERACTIVE=false
 VOICE_FILE=""
 VOICE_DURATION="${NAVILA_VOICE_DURATION:-8}"
 VOICE_DEVICE="${NAVILA_VOICE_DEVICE:-default}"
@@ -39,13 +40,14 @@ resolve_project_path() {
 
 usage() {
   cat <<EOF
-Usage: $0 (--query "Where is my bread?" | --voice | --voice-file PATH) [memory options] [Unitree options]
+Usage: $0 (--query "Where is my bread?" | --voice | --voice-interactive | --voice-file PATH) [memory options] [Unitree options]
 
 Memory options:
   --query TEXT              Typed resident request
   --voice                   Record an 8-second query from the default ALSA microphone
+  --voice-interactive       Press Enter to start and stop recording; duration is the hard maximum
   --voice-file PATH         Transcribe an existing WAV file as the query
-  --voice-duration SECONDS  Recording length for --voice (default: ${VOICE_DURATION})
+  --voice-duration SECONDS  Recording length/max length for voice capture (default: ${VOICE_DURATION})
   --voice-device DEVICE     ALSA capture device for --voice (default: ${VOICE_DEVICE})
   --voice-backend NAME      firered (local) or http (default: ${VOICE_BACKEND})
   --voice-endpoint URL      HTTP transcription endpoint for --voice-backend http
@@ -87,6 +89,11 @@ while (($#)); do
       ;;
     --voice)
       VOICE_REQUESTED=true
+      shift
+      ;;
+    --voice-interactive)
+      VOICE_REQUESTED=true
+      VOICE_INTERACTIVE=true
       shift
       ;;
     --voice-file)
@@ -246,6 +253,10 @@ if [[ "${VOICE_REQUESTED}" == true && -n "${QUERY}" ]]; then
 fi
 
 if [[ "${VOICE_REQUESTED}" == true ]]; then
+  if [[ "${VOICE_INTERACTIVE}" == true && -n "${VOICE_FILE}" ]]; then
+    echo "Choose exactly one of --voice-interactive or --voice-file." >&2
+    exit 2
+  fi
   if [[ -n "${VOICE_FILE}" ]]; then
     VOICE_AUDIO="${VOICE_FILE}"
     [[ -f "${VOICE_AUDIO}" ]] || {
@@ -262,15 +273,70 @@ if [[ "${VOICE_REQUESTED}" == true ]]; then
       exit 2
     }
     VOICE_TEMP="$(mktemp --suffix=.wav "${TMPDIR:-/tmp}/navila-voice-query.XXXXXX")"
-    trap 'rm -f "${VOICE_TEMP}"' EXIT
-    echo "Recording ${VOICE_DURATION}s from ALSA device ${VOICE_DEVICE}..." >&2
-    arecord -q \
-      --device "${VOICE_DEVICE}" \
-      --format S16_LE \
-      --rate 16000 \
-      --channels 1 \
-      --duration "${VOICE_DURATION}" \
-      "${VOICE_TEMP}"
+    VOICE_PID=""
+    cleanup_voice_recording() {
+      if [[ -n "${VOICE_PID}" ]] && kill -0 "${VOICE_PID}" 2>/dev/null; then
+        kill -INT "${VOICE_PID}" 2>/dev/null || true
+        wait "${VOICE_PID}" 2>/dev/null || true
+      fi
+      rm -f "${VOICE_TEMP}"
+    }
+    trap cleanup_voice_recording EXIT
+    trap 'exit 130' INT TERM
+    if [[ "${VOICE_INTERACTIVE}" == true ]]; then
+      [[ -t 0 ]] || {
+        echo "--voice-interactive requires an interactive terminal" >&2
+        exit 2
+      }
+      read -r -p "Press Enter to start recording (maximum ${VOICE_DURATION}s)... " _
+      echo "Recording from ALSA device ${VOICE_DEVICE}; press Enter to stop." >&2
+      arecord -q \
+        --device "${VOICE_DEVICE}" \
+        --format S16_LE \
+        --rate 16000 \
+        --channels 1 \
+        --duration "${VOICE_DURATION}" \
+        "${VOICE_TEMP}" &
+      VOICE_PID=$!
+      VOICE_STOP_REQUESTED=false
+
+      if read -r -t "${VOICE_DURATION}" _; then
+        echo "Stopping recording..." >&2
+      else
+        echo "Maximum recording duration reached (${VOICE_DURATION}s)." >&2
+      fi
+
+      if kill -0 "${VOICE_PID}" 2>/dev/null; then
+        kill -INT "${VOICE_PID}" 2>/dev/null || true
+        VOICE_STOP_REQUESTED=true
+      fi
+      if wait "${VOICE_PID}"; then
+        VOICE_STATUS=0
+      else
+        VOICE_STATUS=$?
+      fi
+      VOICE_PID=""
+      # Depending on the ALSA/arecord build, a deliberate SIGINT can produce
+      # status 1 or 130 after the WAV header has been finalized.  Accept those
+      # statuses only when this wrapper actually requested the stop; an
+      # unexpected recorder exit must still fail closed.
+      if ((VOICE_STATUS != 0)); then
+        if [[ "${VOICE_STOP_REQUESTED}" != true ]] \
+          || ((VOICE_STATUS != 1 && VOICE_STATUS != 130)); then
+          echo "arecord failed with status ${VOICE_STATUS}" >&2
+          exit 2
+        fi
+      fi
+    else
+      echo "Recording ${VOICE_DURATION}s from ALSA device ${VOICE_DEVICE}..." >&2
+      arecord -q \
+        --device "${VOICE_DEVICE}" \
+        --format S16_LE \
+        --rate 16000 \
+        --channels 1 \
+        --duration "${VOICE_DURATION}" \
+        "${VOICE_TEMP}"
+    fi
     VOICE_AUDIO="${VOICE_TEMP}"
   fi
 

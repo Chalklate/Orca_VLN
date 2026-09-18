@@ -93,6 +93,16 @@ or use an existing recording for a repeatable run:
 ./scripts/run_orcalab_memory_guide.sh --voice-file /path/to/query.wav --plan-only
 ```
 
+For interactive microphone capture, use `--voice-interactive`. Press Enter to
+start recording and press Enter again to stop; `--voice-duration` remains the
+hard maximum:
+
+```bash
+./scripts/run_unitree_memory_guide.sh --voice-interactive \
+  --voice-duration 12 --voice-backend http \
+  --voice-endpoint "$NAVILA_VOICE_ENDPOINT"
+```
+
 The FireRed source and weights are intentionally kept outside the pinned
 OrcaLab environment. For a managed GPU deployment, use the Orca-specific
 Modal app:

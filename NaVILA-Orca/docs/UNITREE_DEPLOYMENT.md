@@ -419,6 +419,10 @@ used to test a saved WAV without recording. The local `firered` backend remains
 available when `NAVILA_VOICE_PYTHON`, `NAVILA_FIRERED_ROOT`, and
 `NAVILA_FIRERED_MODEL` are configured.
 
+For an operator-controlled recording window, use `--voice-interactive` instead
+of `--voice`: press Enter to start, press Enter again to stop, and use
+`--voice-duration 12` as the maximum recording length.
+
 Luna first returns structured intent, target, and landmark IDs. With
 `--landmark-seer`, the same OpenAI client then compares each selected
 landmark's scan reference image with the live Go2 image and also checks for the
